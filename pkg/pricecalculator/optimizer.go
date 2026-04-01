@@ -359,8 +359,8 @@ func optimizeTimelineAware(
 			Price:           period.Price,
 			UsedPrice:       breakdownUsedPrice,
 			Quantity:        1,
-			StartTime:       formatTimeIfPeriodHasStart(period, currentTime),
-			EndTime:         formatTimeIfPeriodHasStart(period, currentTime.Add(time.Duration(usedMinutes)*time.Minute)),
+			StartTime:       formatPeriodWindowStartIfPresent(period, currentTime),
+			EndTime:         formatPeriodWindowEndIfPresent(period, currentTime),
 		})
 
 		remainingMinutes -= usedMinutes
@@ -582,12 +582,37 @@ func sortBreakdown(breakdown []BreakdownItem) {
 	})
 }
 
-// formatTimeIfPeriodHasStart returns formatted time string if period has start_time, empty string otherwise
-func formatTimeIfPeriodHasStart(period PricingPeriod, t time.Time) string {
+func periodWindowBoundsForReferenceDay(period PricingPeriod, reference time.Time) (time.Time, time.Time, bool) {
 	if period.StartTime == "" {
+		return time.Time{}, time.Time{}, false
+	}
+
+	hour, minute, err := parseTimeHHMM(period.StartTime)
+	if err != nil {
+		return time.Time{}, time.Time{}, false
+	}
+
+	loc := timeLocation(reference)
+	windowStart := time.Date(reference.Year(), reference.Month(), reference.Day(), hour, minute, 0, 0, loc)
+	windowEnd := windowStart.Add(time.Duration(period.DurationMinutes) * time.Minute)
+
+	return windowStart, windowEnd, true
+}
+
+func formatPeriodWindowStartIfPresent(period PricingPeriod, reference time.Time) string {
+	windowStart, _, ok := periodWindowBoundsForReferenceDay(period, reference)
+	if !ok {
 		return ""
 	}
-	return t.Format(time.DateTime)
+	return windowStart.Format(time.DateTime)
+}
+
+func formatPeriodWindowEndIfPresent(period PricingPeriod, reference time.Time) string {
+	_, windowEnd, ok := periodWindowBoundsForReferenceDay(period, reference)
+	if !ok {
+		return ""
+	}
+	return windowEnd.Format(time.DateTime)
 }
 
 // periodWindowRemainingMinutes returns how many minutes remain in the period's daily window

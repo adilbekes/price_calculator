@@ -563,7 +563,7 @@ func TestBreakdown_WindowPeriod_HasStartAndEndTime(t *testing.T) {
 
 	for _, item := range r.Breakdown {
 		if item.Id == "2" {
-			assert.Equal(t, start, item.StartTime)
+			assert.Equal(t, dt(2026, 4, 1, 9, 0, 0), item.StartTime)
 			assert.Equal(t, dt(2026, 4, 1, 18, 0, 0), item.EndTime)
 		} else {
 			assert.Empty(t, item.StartTime)
