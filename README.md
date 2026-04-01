@@ -107,6 +107,7 @@ Each period in the `periods` array can optionally include an `availability` obje
 | `true` | boolean | Available all day (00:00-23:59) |
 | `false` | boolean | Not available |
 | `"HH:MM-HH:MM"` | string | Available during this time range (e.g., `"10:00-18:00"`) |
+| `["HH:MM-HH:MM", ...]` | array | Available during multiple time ranges (e.g., `["09:00-12:00", "14:00-18:00"]`) |
 
 #### Example:
 ```json
@@ -123,9 +124,21 @@ Each period in the `periods` array can optionally include an `availability` obje
 }
 ```
 
+#### Example with time range arrays:
+```json
+{
+  "id": "period_flexible",
+  "duration": 60,
+  "price": 1500,
+  "availability": {
+    "2026-04-01": ["09:00-12:00", "14:00-18:00"],  // Available morning and afternoon
+    "2026-04-02": "10:00-16:00"                    // Available all day 10:00-16:00
+  }
+}
+```
+
 **Rules:**
-- If an `availability` object is provided, it must include **every date touched by the requested interval** (`start_time` through request end)
-- Missing dates in the availability map are treated as an **invalid request configuration**
+- Missing dates in the `availability` map are treated as `true` (available all day)
 - Time ranges must stay within the same day; overnight ranges such as `"22:00-02:00"` are rejected
 - If no `availability` object is provided, the period is available all times
 - If `period.start_time` is set, the period is only usable at or after that time, and only within its daily `start_time + duration` window
