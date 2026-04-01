@@ -27,11 +27,18 @@ go build -o bin/calculator ./cmd/calculator/
 ### Run
 
 ```bash
-# Using -d flag with duration only
+# Using -d flag with duration only (uses the current local datetime as start_time)
 ./bin/calculator -d '{"duration":150,"mode":"RoundUp","periods":[{"duration":60,"price":1000},{"duration":120,"price":1800}]}'
 
-# Using -d flag with duration and Unix timestamp
-./bin/calculator -d '{"duration":150,"start_timestamp":1743379200,"mode":"RoundUp","periods":[{"duration":60,"price":1000}]}'
+# Using -d flag with period availability (date and optional time range)
+./bin/calculator -d '{"duration":150,"mode":"RoundUp","periods":[{"id":"p1","duration":60,"price":1000,"availability":{"2026-03-31":true,"2026-04-01":"10:00-18:00"}},{"id":"p2","duration":120,"price":1800}]}'
+
+# Using -d flag with duration and explicit datetime
+./bin/calculator -d '{"duration":150,"start_time":"2026-04-01 12:00:00","mode":"RoundUp","periods":[{"duration":60,"price":1000}]}'
+
+# Using -d flag for 30 min request
+./bin/calculator -d '{"duration":30,"mode":"RoundUpMinimumAndProrateAny","periods":[{"duration":60,"price":1000},{"duration":120,"price":1800}]}'
+
 
 # Using -f flag (input file)
 ./bin/calculator -f request.json
@@ -62,24 +69,106 @@ echo '{"duration":150,"mode":"RoundUp","periods":[{"duration":60,"price":1000}]}
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
 | `duration` | int | ✅ | — | **Required:** Requested rental duration in minutes |
-| `start_timestamp` | int64 | ❌ | — | Optional: Unix timestamp in seconds (for metadata/scheduling only; duration is always the authoritative value) |
+| `start_time` | string | ❌ | Current local datetime | Optional: datetime string in `YYYY-MM-DD HH:MM:SS` format; if not provided, current time is used |
 | `periods` | array | ✅ | — | List of `{id, duration, price}` catalog periods |
 | `mode` | string | ✅ | — | See [Pricing modes](#pricing-modes) |
 | `duration_step` | int | ❌ | `5` | Duration is rounded up to this step before pricing |
 | `min_duration` | int | ❌ | `5` | Requests below this are rejected with an error |
 | `price_step` | int | ❌ | `1` | Total price is rounded up to the nearest multiple of this step (e.g. step `5`: 1084 → 1085) |
 
+### Period Fields
+
+Each object in `periods` supports these fields:
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `id` | string | ❌ | Optional unique identifier (if any period has `id`, all periods must have unique `id`) |
+| `duration` | int | ✅ | Catalog duration in minutes |
+| `price` | int64 | ✅ | Catalog price |
+| `start_time` | string | ❌ | Period start-of-day time in `HH:MM` format (for example, `"09:00"`) |
+| `availability` | object | ❌ | Per-date availability map (see below) |
+
+`period.start_time` semantics:
+- It is a time-of-day anchor for that period, not a full datetime.
+- A period with `start_time` is unavailable before that time on a given day.
+- The period defines a daily window from `start_time` to `start_time + duration`.
+- Requests can be split across periods when a window ends (for example, one period until 18:00, another after 18:00).
+
+### Period Availability
+
+Each period in the `periods` array can optionally include an `availability` object that specifies:
+
+1. **Date-based availability** — Map of dates (YYYY-MM-DD) to availability status
+2. **Time ranges** — Optional time range for each available date (HH:MM-HH:MM format)
+
+#### Availability Values:
+| Value | Type | Meaning |
+|---|---|---|
+| `true` | boolean | Available all day (00:00-23:59) |
+| `false` | boolean | Not available |
+| `"HH:MM-HH:MM"` | string | Available during this time range (e.g., `"10:00-18:00"`) |
+
+#### Example:
+```json
+{
+  "id": "period_1",
+  "duration": 60,
+  "price": 1000,
+  "availability": {
+    "2026-03-31": true,           // Available all day
+    "2026-04-01": "10:00-18:00",  // Available 10:00-18:00
+    "2026-04-02": false,          // Not available
+    "2026-04-03": "22:00-23:59"   // Late-evening availability
+  }
+}
+```
+
+**Rules:**
+- If an `availability` object is provided, it must include **every date touched by the requested interval** (`start_time` through request end)
+- Missing dates in the availability map are treated as an **invalid request configuration**
+- Time ranges must stay within the same day; overnight ranges such as `"22:00-02:00"` are rejected
+- If no `availability` object is provided, the period is available all times
+- If `period.start_time` is set, the period is only usable at or after that time, and only within its daily `start_time + duration` window
+- Unavailable periods are **skipped** during calculation; the request still succeeds if the remaining periods can satisfy it
+- If all periods are unavailable for the requested time, the calculator returns `no pricing solution found`
+
+#### Example with period `start_time`
+```json
+{
+  "duration": 540,
+  "start_time": "2026-04-01 10:00:00",
+  "mode": "RoundUp",
+  "periods": [
+    {
+      "id": "day_window",
+      "duration": 540,
+      "price": 4000,
+      "start_time": "09:00",
+      "availability": {"2026-04-01": true}
+    },
+    {
+      "id": "hourly",
+      "duration": 60,
+      "price": 1000,
+      "availability": {"2026-04-01": true}
+    }
+  ]
+}
+```
+
+In this example, `day_window` can only be used inside `09:00-18:00` on that day. A request continuing past 18:00 is completed by other available periods.
+
 
 ### Output
 
-**Success** (exit 0) with timestamp:
+**Success** (exit 0) with datetime:
 ```json
-{"start_timestamp":1743379200,"end_timestamp":1743390000,"total":2300,"covered":180,"breakdown":[{"id":"2","duration":120,"price":1300,"quantity":1}]}
+{"start_time":"2026-04-01 20:00:00","end_time":"2026-04-01 23:00:00","total":2300,"covered":180,"breakdown":[{"id":"2","duration":120,"price":1800,"quantity":1}]}
 ```
 
-**Success** (exit 0) without timestamp:
+**Success** (exit 0) without start datetime:
 ```json
-{"total":2300,"covered":180,"breakdown":[{"id":"2","duration":120,"price":1300,"quantity":1}]}
+{"total":2300,"covered":180,"breakdown":[{"id":"2","duration":120,"price":1800,"quantity":1}]}
 ```
 
 **Error** (exit 1):
@@ -90,53 +179,12 @@ echo '{"duration":150,"mode":"RoundUp","periods":[{"duration":60,"price":1000}]}
 **Output Fields:**
 | Field | Type | Description |
 |---|---|---|
-| `start_timestamp` | int64 | Unix timestamp (seconds) - only included if provided in request |
-| `end_timestamp` | int64 | Calculated as `start_timestamp + (covered_minutes * 60)` - only included if provided in request |
+| `start_time` | string | Request datetime in `YYYY-MM-DD HH:MM:SS` format - only included if provided in request |
+| `end_time` | string | Calculated request end datetime in `YYYY-MM-DD HH:MM:SS` format - only included if `start_time` was provided |
 | `total` | int64 | Final price after all calculations and rounding |
 | `covered` | int | Actual minutes covered by the pricing |
 | `breakdown` | array | List of periods used with quantities |
 | `error` | string | Error message (only in failure case) |
-
-### Calling from Python
-
-```python
-import subprocess, json
-
-result = subprocess.run(
-    ["./bin/calculator", "-d", json.dumps({
-        "duration": 150,
-        "mode": "RoundUp",
-        "periods": [
-            {"duration": 60,  "price": 1000},
-            {"duration": 120, "price": 1800},
-        ]
-    })],
-    capture_output=True, text=True
-)
-data = json.loads(result.stdout)
-if result.returncode != 0:
-    raise RuntimeError(data["error"])
-print(data["total"])
-```
-
-### Calling from PHP
-
-```php
-$input = json_encode([
-    "duration" => 150,
-    "mode" => "RoundUp",
-    "periods" => [
-        ["duration" => 60,  "price" => 1000],
-        ["duration" => 120, "price" => 1800],
-    ],
-]);
-$proc = proc_open('./bin/calculator', [['pipe','r'],['pipe','w'],['pipe','w']], $pipes);
-fwrite($pipes[0], $input);
-fclose($pipes[0]);
-$data = json_decode(stream_get_contents($pipes[1]), true);
-proc_close($proc);
-echo $data['total'];
-```
 
 ## Pricing modes
 
@@ -161,8 +209,8 @@ Periods used in both scenarios:
 | Duration | Price |
 |---|---|
 | 60 min | 1000 |
-| 120 min | 1300 |
-| 190 min | 2500 |
+| 120 min | 1800 |
+| 180 min | 2500 |
 
 **Scenario A — 30 min requested** *(below the minimum 60 min period)*
 
@@ -177,9 +225,9 @@ Periods used in both scenarios:
 
 | Mode | Total Price | Covered Minutes | What happened |
 |---|---|---|---|
-| `RoundUp` | 2300 | 180 | 120 min + 60 min = 1300 + 1000 (over-coverage to 180 min) |
+| `RoundUp` | 2300 | 180 | 120 min + 60 min = 1800 + 1000 (over-coverage to 180 min) |
 | `ProrateMinimum` | 2300 | 180 | Same as `RoundUp` — prorate only applies below minimum |
-| `ProrateAny` | 1800 | 150 | 120 min + prorate(60 min for 30 min) = 1300 + 500 (exact coverage) |
+| `ProrateAny` | 1800 | 150 | 120 min + prorate(60 min for 30 min) = 1800 + 500 (exact coverage) |
 | `RoundUpMinimumAndProrateAny` | 1800 | 150 | Same as `ProrateAny` when at or above minimum |
 
 ## Requested duration rules

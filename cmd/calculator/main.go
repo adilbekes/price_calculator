@@ -18,8 +18,8 @@
 //	  "mode": "RoundUp",
 //	  "periods": [
 //	    {"duration": 60,  "price": 1000},
-//	    {"duration": 120, "price": 1300},
-//	    {"duration": 190, "price": 2500}
+//	    {"duration": 120, "price": 1800},
+//	    {"duration": 180, "price": 2500}
 //	  ]
 //	}
 package main
@@ -42,6 +42,10 @@ func writeError(msg string) {
 	_ = json.NewEncoder(os.Stdout).Encode(errorResponse{Error: msg})
 }
 
+func writeErrorToStderr(msg string) {
+	_ = json.NewEncoder(os.Stderr).Encode(errorResponse{Error: msg})
+}
+
 func writeErrorToFile(filename string, msg string) error {
 	file, err := os.Create(filename)
 	if err != nil {
@@ -49,6 +53,13 @@ func writeErrorToFile(filename string, msg string) error {
 	}
 	defer file.Close()
 	return json.NewEncoder(file).Encode(errorResponse{Error: msg})
+}
+
+func reportError(msg string, outputFile string) {
+	writeErrorToStderr(msg)
+	if outputFile != "" {
+		_ = writeErrorToFile(outputFile, msg)
+	}
 }
 
 func main() {
@@ -61,7 +72,7 @@ func main() {
 
 	// Determine input source: -d flag > -f flag > stdin
 	if *dataFlag != "" && *fileFlag != "" {
-		writeError("cannot use both -d and -f flags")
+		reportError("cannot use both -d and -f flags", *outputFlag)
 		os.Exit(1)
 	}
 
@@ -71,7 +82,7 @@ func main() {
 		// File argument provided
 		file, err := os.Open(*fileFlag)
 		if err != nil {
-			writeError(fmt.Sprintf("failed to open file: %s", err))
+			reportError(fmt.Sprintf("failed to open file: %s", err), *outputFlag)
 			os.Exit(1)
 		}
 		defer file.Close()
@@ -83,22 +94,14 @@ func main() {
 
 	var req pricecalculator.CalculateRequest
 	if err := json.NewDecoder(inputData).Decode(&req); err != nil {
-		if *outputFlag != "" {
-			_ = writeErrorToFile(*outputFlag, fmt.Sprintf("invalid input JSON: %s", err))
-		} else {
-			writeError(fmt.Sprintf("invalid input JSON: %s", err))
-		}
+		reportError(fmt.Sprintf("invalid input JSON: %s", err), *outputFlag)
 		os.Exit(1)
 	}
 
 	calc := pricecalculator.NewCalculator()
 	result, err := calc.Calculate(req)
 	if err != nil {
-		if *outputFlag != "" {
-			_ = writeErrorToFile(*outputFlag, err.Error())
-		} else {
-			writeError(err.Error())
-		}
+		reportError(err.Error(), *outputFlag)
 		os.Exit(1)
 	}
 
@@ -106,17 +109,17 @@ func main() {
 	if *outputFlag != "" {
 		file, err := os.Create(*outputFlag)
 		if err != nil {
-			writeError(fmt.Sprintf("failed to create output file: %s", err))
+			reportError(fmt.Sprintf("failed to create output file: %s", err), *outputFlag)
 			os.Exit(1)
 		}
 		defer file.Close()
 		if err := json.NewEncoder(file).Encode(result); err != nil {
-			writeError(fmt.Sprintf("failed to encode result: %s", err))
+			reportError(fmt.Sprintf("failed to encode result: %s", err), *outputFlag)
 			os.Exit(1)
 		}
 	} else {
 		if err := json.NewEncoder(os.Stdout).Encode(result); err != nil {
-			writeError(fmt.Sprintf("failed to encode result: %s", err))
+			writeErrorToStderr(fmt.Sprintf("failed to encode result: %s", err))
 			os.Exit(1)
 		}
 	}

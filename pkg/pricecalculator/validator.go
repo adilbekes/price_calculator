@@ -1,5 +1,10 @@
 package pricecalculator
 
+import (
+	"strconv"
+	"time"
+)
+
 // validateDuration validates requested duration in minutes.
 //
 // Rules:
@@ -25,6 +30,21 @@ func validateRequest(req CalculateRequest) error {
 	}
 
 	if err := validatePricingMode(req.PricingMode); err != nil {
+		return err
+	}
+
+	effectiveTimestamp, err := getEffectiveStartTime(req.StartTime)
+	if err != nil {
+		return err
+	}
+
+	normalizedDuration := normalizeDuration(
+		req.RequestedDurationMinutes,
+		effectiveRequestedDurationStepMinutes(req.RequestedDurationStepMinutes),
+	)
+	intervalStart, intervalEnd := requestInterval(effectiveTimestamp, normalizedDuration)
+
+	if err := validatePeriodsAvailability(req.Periods, intervalStart, intervalEnd); err != nil {
 		return err
 	}
 
@@ -67,7 +87,7 @@ func validatePeriods(periods []PricingPeriod) error {
 		return NewPeriodsError("periods array cannot be empty")
 	}
 
-	seenPeriods := make(map[[2]int64]struct{}, len(periods))
+	seenPeriods := make(map[string]struct{}, len(periods))
 	seenIds := make(map[string]struct{})
 
 	// Check if any period has an ID
@@ -80,32 +100,63 @@ func validatePeriods(periods []PricingPeriod) error {
 	}
 
 	for i, period := range periods {
-		if period.DurationMinutes <= 0 {
-			return NewPeriodsError("period[%d]: duration must be positive, got %d", i, period.DurationMinutes)
+		// Validate that period has either time-based (startTime+endTime) or duration-based specification
+		effectiveDuration, err := getEffectiveDurationMinutes(period)
+		if err != nil {
+			return NewPeriodsError("period[%d]: %s", i, err.Error())
 		}
 
 		if period.Price < 0 {
 			return NewPeriodsError("period[%d]: price cannot be negative, got %d", i, period.Price)
 		}
 
-		key := [2]int64{int64(period.DurationMinutes), period.Price}
-		if _, exists := seenPeriods[key]; exists {
-			return NewPeriodsError("period[%d]: duplicate period (duration=%d, price=%d)", i, period.DurationMinutes, period.Price)
-		}
+		if hasAnyId {
+			// If any period has an ID, all periods must have an ID and IDs must be unique.
+			if period.Id == "" {
+				return NewPeriodsError("period[%d]: all periods must have an id if any period has an id", i)
+			}
 
-		seenPeriods[key] = struct{}{}
-
-		// If any period has an ID, all periods must have an ID
-		if hasAnyId && period.Id == "" {
-			return NewPeriodsError("period[%d]: all periods must have an id if any period has an id", i)
-		}
-
-		// Validate ID uniqueness if ID is provided
-		if period.Id != "" {
 			if _, exists := seenIds[period.Id]; exists {
 				return NewPeriodsError("period[%d]: duplicate id '%s'", i, period.Id)
 			}
 			seenIds[period.Id] = struct{}{}
+			continue
+		}
+
+		key := period.StartTime + "|" + strconv.Itoa(effectiveDuration) + "|" + strconv.FormatInt(period.Price, 10)
+		if _, exists := seenPeriods[key]; exists {
+			if period.StartTime != "" {
+				return NewPeriodsError("period[%d]: duplicate period (start_time=%s, duration=%d, price=%d)", i, period.StartTime, effectiveDuration, period.Price)
+			}
+			return NewPeriodsError("period[%d]: duplicate period (duration=%d, price=%d)", i, effectiveDuration, period.Price)
+		}
+
+		seenPeriods[key] = struct{}{}
+	}
+
+	return nil
+}
+
+func validatePeriodsAvailability(periods []PricingPeriod, intervalStart time.Time, intervalEnd time.Time) error {
+	for _, period := range periods {
+		if len(period.Availability) == 0 {
+			continue
+		}
+
+		for _, day := range touchedDates(intervalStart, intervalEnd) {
+			dateStr := day.Format(time.DateOnly)
+			availability, exists := period.Availability[dateStr]
+			if !exists {
+				return NewRequestError(
+					"period '%s' availability must define date %s for the requested interval",
+					period.Identifier(),
+					dateStr,
+				)
+			}
+
+			if _, _, _, err := availabilityWindowForDate(day, availability); err != nil {
+				return NewRequestError("period '%s': %s", period.Identifier(), err.Error())
+			}
 		}
 	}
 

@@ -9,7 +9,6 @@ var (
 	ErrInvalidRequest  = errors.New("invalid request")
 	ErrInvalidPeriods  = errors.New("invalid pricing periods")
 	ErrInvalidDuration = errors.New("invalid duration")
-	ErrNoSolution      = errors.New("no pricing solution found")
 )
 
 // CustomError provides a descriptive error message while wrapping an original error

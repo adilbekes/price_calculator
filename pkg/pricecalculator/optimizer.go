@@ -3,6 +3,7 @@ package pricecalculator
 import (
 	"math"
 	"sort"
+	"time"
 )
 
 // optimizePrice calculates the minimum total price needed to cover
@@ -13,7 +14,7 @@ import (
 // - result must have the minimum possible TotalPrice
 // - CoveredMinutes can be equal to or greater than requiredMinutes
 // - if multiple combinations exist, return any one with the same minimum total price
-// - if no valid solution exists, return ErrNoSolution
+// - always returns a deterministic fallback solution when DP cannot produce one
 //
 // Notes:
 // - requiredMinutes is already validated
@@ -75,7 +76,7 @@ func optimizePrice(
 	}
 
 	if bestMinutes == -1 {
-		return CalculateResult{}, ErrNoSolution
+		return fallbackSolution(requiredMinutes, periods), nil
 	}
 
 	breakdown := buildBreakdown(bestMinutes, prev, used, periods)
@@ -110,7 +111,7 @@ func optimizePriceWithOptionalProration(
 	case exactWithProrationErr == nil:
 		return exactWithProrationResult, nil
 	default:
-		return CalculateResult{}, ErrNoSolution
+		return fallbackSolution(requiredMinutes, periods), nil
 	}
 }
 
@@ -186,15 +187,19 @@ func optimizePriceExactWithProration(
 	}
 
 	if bestFullMinutes == -1 {
-		return CalculateResult{}, ErrNoSolution
+		return fallbackSolution(requiredMinutes, periods), nil
 	}
 
 	breakdown := buildBreakdown(bestFullMinutes, prev, used, periods)
 	if useProration {
+		// Calculate the remainder minutes that will be used from the prorated period
+		remainderMinutes := requiredMinutes - bestFullMinutes
 		breakdown = append(breakdown, BreakdownItem{
 			Id:              minimumPeriod.Id,
 			DurationMinutes: minimumPeriod.DurationMinutes,
+			UsedDuration:    remainderMinutes,
 			Price:           minimumPeriod.Price,
+			UsedPrice:       calculateProratedPrice(minimumPeriod, remainderMinutes),
 			Quantity:        1,
 		})
 		breakdown = mergeBreakdownItems(breakdown)
@@ -205,6 +210,173 @@ func optimizePriceExactWithProration(
 		TotalPrice:     bestPrice,
 		CoveredMinutes: requiredMinutes,
 		Breakdown:      breakdown,
+	}, nil
+}
+
+// optimizeTimelineAware fills the requested duration timeline sequentially,
+// selecting the best available period at each step based on availability windows.
+// This respects time-based period switches (e.g., cheaper period available after 22:00).
+// Prorating is only applied in ProrateMinimum, ProrateAny, and RoundUpMinimumAndProrateAny modes.
+func optimizeTimelineAware(
+	requiredMinutes int,
+	periods []PricingPeriod,
+	startTime time.Time,
+	mode PricingMode,
+) (CalculateResult, error) {
+	if len(periods) == 0 {
+		return CalculateResult{}, NewRequestError("no periods available")
+	}
+
+	// Determine if prorating is allowed in this mode
+	allowProrating := mode == PricingModeProrateMinimum || mode == PricingModeProrateAny || mode == PricingModeRoundUpMinimumAndProrateAny
+
+	currentTime := startTime
+	remainingMinutes := requiredMinutes
+	timeline := make([]BreakdownItem, 0)
+	totalPrice := int64(0)
+	coveredMinutes := 0
+
+	for remainingMinutes > 0 {
+		// Select the period with the lowest effective price-per-minute.
+		// Effective minutes = min(window remaining, remaining request minutes).
+		// Using cross-multiplication: p_a/e_a < p_b/e_b ⟺ p_a*e_b < p_b*e_a
+		bestPeriod := -1
+		bestEffective := 0
+
+		for i, period := range periods {
+			available, err := isPeriodAvailableAtTime(period, currentTime)
+			if err != nil || !available {
+				continue
+			}
+
+			windowRem := periodWindowRemainingMinutes(period, currentTime)
+			effective := windowRem
+			if effective > remainingMinutes {
+				effective = remainingMinutes
+			}
+			if effective <= 0 {
+				continue
+			}
+
+			if bestPeriod == -1 {
+				bestPeriod = i
+				bestEffective = effective
+				continue
+			}
+
+			best := periods[bestPeriod]
+			// period cheaper per minute when: period.Price * bestEffective < best.Price * effective
+			if period.Price*int64(bestEffective) < best.Price*int64(effective) {
+				bestPeriod = i
+				bestEffective = effective
+			}
+		}
+
+		if bestPeriod == -1 {
+			// No period available — fallback to cheapest by absolute price
+			for i, period := range periods {
+				if bestPeriod == -1 || period.Price < periods[bestPeriod].Price {
+					bestPeriod = i
+				}
+			}
+			if bestPeriod == -1 {
+				break
+			}
+			bestEffective = periodWindowRemainingMinutes(periods[bestPeriod], currentTime)
+			if bestEffective > remainingMinutes {
+				bestEffective = remainingMinutes
+			}
+		}
+
+		// Use the best available period
+		period := periods[bestPeriod]
+
+		// usedMinutes starts at the period's window-capped effective coverage.
+		// In non-prorating modes this is how many minutes of this period we consume.
+		// In prorating modes it may be further reduced when a cheaper period arrives.
+		usedMinutes := bestEffective
+		if usedMinutes > period.DurationMinutes {
+			usedMinutes = period.DurationMinutes
+		}
+		price := period.Price
+
+		// If the period has a start_time (fixed daily window), cap usedMinutes to
+		// the minutes remaining in the window starting from currentTime.
+		if period.StartTime != "" {
+			windowRemaining := periodWindowRemainingMinutes(period, currentTime)
+			if windowRemaining < usedMinutes {
+				usedMinutes = windowRemaining
+			}
+		}
+
+		// Only check for cheaper periods and prorate if prorating is allowed
+		if allowProrating {
+			// Check if a cheaper period becomes available within the next period duration
+			// If so, calculate how much time until it becomes available and use the current period only for that
+			timeUntilNextChange := period.DurationMinutes
+			for i, otherPeriod := range periods {
+				if i == bestPeriod || otherPeriod.Price >= period.Price {
+					continue // Skip current period and more expensive ones
+				}
+
+				// Check future times to see when this period becomes available
+				for futureMinute := 1; futureMinute <= period.DurationMinutes && futureMinute < timeUntilNextChange; futureMinute++ {
+					futureTime := currentTime.Add(time.Duration(futureMinute) * time.Minute)
+					available, err := isPeriodAvailableAtTime(otherPeriod, futureTime)
+					if err == nil && available {
+						timeUntilNextChange = futureMinute
+						break
+					}
+				}
+			}
+
+			// Use period for the calculated time (possibly prorated)
+			usedMinutes = timeUntilNextChange
+			if usedMinutes > remainingMinutes {
+				usedMinutes = remainingMinutes
+			}
+
+			// Calculate prorated price if using less than full duration
+			price = period.Price
+			if usedMinutes < period.DurationMinutes {
+				price = calculateProratedPrice(period, usedMinutes)
+			}
+		}
+
+		// In non-prorating modes, breakdown reflects charged full period values.
+		// In prorating modes it may be further reduced when a cheaper period arrives.
+		breakdownUsedDuration := period.DurationMinutes
+		breakdownUsedPrice := period.Price
+		if allowProrating && usedMinutes < period.DurationMinutes {
+			breakdownUsedDuration = usedMinutes
+			breakdownUsedPrice = price
+		}
+
+		timeline = append(timeline, BreakdownItem{
+			Id:              period.Id,
+			DurationMinutes: period.DurationMinutes,
+			UsedDuration:    breakdownUsedDuration,
+			Price:           period.Price,
+			UsedPrice:       breakdownUsedPrice,
+			Quantity:        1,
+			StartTime:       formatTimeIfPeriodHasStart(period, currentTime),
+			EndTime:         formatTimeIfPeriodHasStart(period, currentTime.Add(time.Duration(usedMinutes)*time.Minute)),
+		})
+
+		remainingMinutes -= usedMinutes
+		coveredMinutes += usedMinutes
+		totalPrice += price
+		currentTime = currentTime.Add(time.Duration(usedMinutes) * time.Minute)
+	}
+
+	// Merge breakdown items with same period
+	mergedTimeline := mergeBreakdownItems(timeline)
+	sortBreakdown(mergedTimeline)
+
+	return CalculateResult{
+		TotalPrice:     totalPrice,
+		CoveredMinutes: coveredMinutes,
+		Breakdown:      mergedTimeline,
 	}, nil
 }
 
@@ -248,7 +420,7 @@ func cheapestPeriodByDuration(periods []PricingPeriod, duration int) (PricingPer
 	}
 
 	if !found {
-		return PricingPeriod{}, ErrNoSolution
+		return PricingPeriod{}, NewRequestError("no pricing periods available for duration %d", duration)
 	}
 
 	return selected, nil
@@ -269,7 +441,9 @@ func priceBelowMinimum(req CalculateRequest) (CalculateResult, error) {
 			Breakdown: []BreakdownItem{{
 				Id:              minimumPeriod.Id,
 				DurationMinutes: minimumPeriod.DurationMinutes,
+				UsedDuration:    minimumPeriod.DurationMinutes,
 				Price:           minimumPeriod.Price,
+				UsedPrice:       minimumPeriod.Price,
 				Quantity:        1,
 			}},
 		}, nil
@@ -282,7 +456,9 @@ func priceBelowMinimum(req CalculateRequest) (CalculateResult, error) {
 			Breakdown: []BreakdownItem{{
 				Id:              minimumPeriod.Id,
 				DurationMinutes: minimumPeriod.DurationMinutes,
+				UsedDuration:    req.RequestedDurationMinutes,
 				Price:           minimumPeriod.Price,
+				UsedPrice:       price,
 				Quantity:        1,
 			}},
 		}, nil
@@ -297,6 +473,33 @@ func ceilDivInt64(numerator, denominator int64) int64 {
 
 func calculateProratedPrice(period PricingPeriod, durationMinutes int) int64 {
 	return ceilDivInt64(period.Price*int64(durationMinutes), int64(period.DurationMinutes))
+}
+
+func fallbackSolution(requiredMinutes int, periods []PricingPeriod) CalculateResult {
+	best := periods[0]
+	for _, period := range periods[1:] {
+		// Compare by effective price per minute using cross multiplication.
+		if period.Price*int64(best.DurationMinutes) < best.Price*int64(period.DurationMinutes) {
+			best = period
+		}
+	}
+
+	quantity := (requiredMinutes + best.DurationMinutes - 1) / best.DurationMinutes
+	covered := quantity * best.DurationMinutes
+	total := int64(quantity) * best.Price
+
+	return CalculateResult{
+		TotalPrice:     total,
+		CoveredMinutes: covered,
+		Breakdown: []BreakdownItem{{
+			Id:              best.Id,
+			DurationMinutes: best.DurationMinutes,
+			UsedDuration:    best.DurationMinutes,
+			Price:           best.Price,
+			UsedPrice:       best.Price,
+			Quantity:        quantity,
+		}},
+	}
 }
 
 func buildBreakdown(
@@ -323,7 +526,9 @@ func buildBreakdown(
 		breakdown = append(breakdown, BreakdownItem{
 			Id:              period.Id,
 			DurationMinutes: period.DurationMinutes,
+			UsedDuration:    period.DurationMinutes,
 			Price:           period.Price,
+			UsedPrice:       period.Price,
 			Quantity:        quantity,
 		})
 	}
@@ -335,10 +540,12 @@ func buildBreakdown(
 
 func mergeBreakdownItems(breakdown []BreakdownItem) []BreakdownItem {
 	merged := make([]BreakdownItem, 0, len(breakdown))
-	indexByPeriod := make(map[[2]int64]int, len(breakdown))
+	indexByPeriod := make(map[[4]int64]int, len(breakdown))
 
 	for _, item := range breakdown {
-		key := [2]int64{int64(item.DurationMinutes), item.Price}
+		// Merge only rows with the same pricing period AND the same usage profile.
+		// This keeps full-use items (used==duration) separate from prorated items.
+		key := [4]int64{int64(item.DurationMinutes), item.Price, int64(item.UsedDuration), item.UsedPrice}
 		if index, exists := indexByPeriod[key]; exists {
 			merged[index].Quantity += item.Quantity
 			continue
@@ -361,6 +568,43 @@ func sortBreakdown(breakdown []BreakdownItem) {
 			return breakdown[i].Price > breakdown[j].Price
 		}
 
+		iFull := breakdown[i].UsedDuration == breakdown[i].DurationMinutes
+		jFull := breakdown[j].UsedDuration == breakdown[j].DurationMinutes
+		if iFull != jFull {
+			return iFull
+		}
+
+		if breakdown[i].UsedDuration != breakdown[j].UsedDuration {
+			return breakdown[i].UsedDuration > breakdown[j].UsedDuration
+		}
+
 		return breakdown[i].Quantity > breakdown[j].Quantity
 	})
+}
+
+// formatTimeIfPeriodHasStart returns formatted time string if period has start_time, empty string otherwise
+func formatTimeIfPeriodHasStart(period PricingPeriod, t time.Time) string {
+	if period.StartTime == "" {
+		return ""
+	}
+	return t.Format(time.DateTime)
+}
+
+// periodWindowRemainingMinutes returns how many minutes remain in the period's daily window
+// starting from currentTime. When the period has no start_time it returns the full DurationMinutes.
+func periodWindowRemainingMinutes(period PricingPeriod, currentTime time.Time) int {
+	if period.StartTime == "" {
+		return period.DurationMinutes
+	}
+	hour, minute, err := parseTimeHHMM(period.StartTime)
+	if err != nil {
+		return period.DurationMinutes
+	}
+	loc := timeLocation(currentTime)
+	windowStart := time.Date(currentTime.Year(), currentTime.Month(), currentTime.Day(), hour, minute, 0, 0, loc)
+	windowEnd := windowStart.Add(time.Duration(period.DurationMinutes) * time.Minute)
+	if !windowEnd.After(currentTime) {
+		return 0
+	}
+	return int(windowEnd.Sub(currentTime).Minutes())
 }

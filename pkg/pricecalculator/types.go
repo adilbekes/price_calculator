@@ -63,15 +63,35 @@ type PricingPeriod struct {
 	Id              string `json:"id,omitempty"`
 	DurationMinutes int    `json:"duration"`
 	Price           int64  `json:"price"`
+	// Optional fixed start time for this period in HH:MM format.
+	// Duration is still taken from DurationMinutes.
+	StartTime string `json:"start_time,omitempty"`
+	// Availability map with dates (YYYY-MM-DD) as keys.
+	// Value can be:
+	// - true: available all day (00:00-23:59)
+	// - false: not available
+	// - string: time range like "10:00-17:59" (available during this range)
+	Availability map[string]interface{} `json:"availability,omitempty"`
 }
 
 func (pp PricingPeriod) String() string {
+	if pp.StartTime != "" {
+		return fmt.Sprintf("%s + %d⏱ - %d💰", pp.StartTime, pp.DurationMinutes, pp.Price)
+	}
 	return fmt.Sprintf("%d⏱ - %d💰", pp.DurationMinutes, pp.Price)
 }
 
+func (pp PricingPeriod) Identifier() string {
+	if pp.Id != "" {
+		return pp.Id
+	}
+
+	return pp.String()
+}
+
 type CalculateRequest struct {
-	RequestedDurationMinutes        int             `json:"duration"` // Required: rental duration in minutes
-	StartTimestamp                  int64           `json:"start_timestamp,omitempty"` // Optional: Unix timestamp (seconds) - if provided, duration is still used to calculate end time
+	RequestedDurationMinutes        int             `json:"duration"`                  // Required: rental duration in minutes
+	StartTime                       string          `json:"start_time,omitempty"` // Optional: datetime string in format "2006-01-02 15:04:05"; defaults to current time
 	RequestedDurationStepMinutes    int             `json:"duration_step,omitempty"`
 	RequestedMinimumDurationMinutes int             `json:"min_duration,omitempty"`
 	Periods                         []PricingPeriod `json:"periods"`
@@ -81,18 +101,41 @@ type CalculateRequest struct {
 
 type BreakdownItem struct {
 	Id              string `json:"id,omitempty"`
-	DurationMinutes int    `json:"duration"`
-	Price           int64  `json:"price"`
+	DurationMinutes int    `json:"duration"`      // Period's catalog duration
+	UsedDuration    int    `json:"used_duration"` // Actual minutes used; defaults to duration for non-prorated items
+	Price           int64  `json:"price"`         // Period's catalog price
+	UsedPrice       int64  `json:"used_price"`    // Actual charged price for the used minutes; defaults to price
 	Quantity        int    `json:"quantity"`
+	StartTime       string `json:"start_time,omitempty"` // Actual start time when this period is used (if period has start_time)
+	EndTime         string `json:"end_time,omitempty"`   // Actual end time when this period is used (if period has start_time)
 }
 
 func (bi BreakdownItem) String() string {
-	return fmt.Sprintf("%dx[%d⏱ - %d💰]", bi.Quantity, bi.DurationMinutes, bi.Price)
+	if bi.UsedDuration != bi.DurationMinutes {
+		// For prorated usage, show both period duration and actual used
+		if bi.UsedPrice != bi.Price {
+			timeInfo := ""
+			if bi.StartTime != "" && bi.EndTime != "" {
+				timeInfo = fmt.Sprintf(" %s→%s", bi.StartTime, bi.EndTime)
+			}
+			return fmt.Sprintf("%dx[%d/%d⏱ - %d/%d💰]%s", bi.Quantity, bi.UsedDuration, bi.DurationMinutes, bi.UsedPrice, bi.Price, timeInfo)
+		}
+		timeInfo := ""
+		if bi.StartTime != "" && bi.EndTime != "" {
+			timeInfo = fmt.Sprintf(" %s→%s", bi.StartTime, bi.EndTime)
+		}
+		return fmt.Sprintf("%dx[%d/%d⏱ - %d💰]%s", bi.Quantity, bi.UsedDuration, bi.DurationMinutes, bi.Price, timeInfo)
+	}
+	timeInfo := ""
+	if bi.StartTime != "" && bi.EndTime != "" {
+		timeInfo = fmt.Sprintf(" %s→%s", bi.StartTime, bi.EndTime)
+	}
+	return fmt.Sprintf("%dx[%d⏱ - %d💰]%s", bi.Quantity, bi.DurationMinutes, bi.Price, timeInfo)
 }
 
 type CalculateResult struct {
-	StartTimestamp int64           `json:"start_timestamp,omitempty"` // Unix timestamp (seconds) if provided in request
-	EndTimestamp   int64           `json:"end_timestamp,omitempty"`   // Calculated as start_timestamp + (duration * 60)
+	StartTime      string          `json:"start_time,omitempty"` // Datetime string if provided in request
+	EndTime        string          `json:"end_time,omitempty"` // Calculated as start_time + (duration * 60)
 	TotalPrice     int64           `json:"total"`
 	CoveredMinutes int             `json:"covered"`
 	Breakdown      []BreakdownItem `json:"breakdown"`
