@@ -28,18 +28,27 @@ var pricingModeValues = map[string]PricingMode{
 	"RoundUpMinimumAndProrateAny": PricingModeRoundUpMinimumAndProrateAny,
 }
 
-func (pm PricingMode) String() string {
-	if name, ok := pricingModeNames[pm]; ok {
+func (pm *PricingMode) String() string {
+	if pm == nil {
+		return "PricingMode(<nil>)"
+	}
+	if name, ok := pricingModeNames[*pm]; ok {
 		return name
 	}
-	return fmt.Sprintf("PricingMode(%d)", int(pm))
+	return fmt.Sprintf("PricingMode(%d)", int(*pm))
 }
 
-func (pm PricingMode) MarshalJSON() ([]byte, error) {
+func (pm *PricingMode) MarshalJSON() ([]byte, error) {
+	if pm == nil {
+		return []byte("null"), nil
+	}
 	return json.Marshal(pm.String())
 }
 
 func (pm *PricingMode) UnmarshalJSON(data []byte) error {
+	if pm == nil {
+		return fmt.Errorf("cannot unmarshal into nil *PricingMode")
+	}
 	// accept string names
 	var s string
 	if err := json.Unmarshal(data, &s); err == nil {

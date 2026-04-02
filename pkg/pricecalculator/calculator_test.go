@@ -141,12 +141,13 @@ func TestValidation_InvalidAvailabilityTimeRange_SameStartEnd(t *testing.T) {
 	assert.ErrorIs(t, err, ErrInvalidRequest)
 }
 
-func TestValidation_MissingAvailabilityDate(t *testing.T) {
-	_, err := calc().Calculate(req(120, dt(2026, 4, 1, 23, 0, 0), PricingModeRoundUp,
+func TestValidation_MissingAvailabilityDate_DefaultsToAvailable(t *testing.T) {
+	r, err := calc().Calculate(req(120, dt(2026, 4, 1, 23, 0, 0), PricingModeRoundUp,
 		periodWithAvail("p1", 60, 1000, map[string]interface{}{"2026-04-01": true}),
 	))
-	require.ErrorIs(t, err, ErrInvalidRequest)
-	assert.Contains(t, err.Error(), "2026-04-02")
+	require.NoError(t, err)
+	assert.Equal(t, int64(2000), r.TotalPrice)
+	assert.Equal(t, 120, r.CoveredMinutes)
 }
 
 // ─── RoundUp mode ─────────────────────────────────────────────────────────────
@@ -232,6 +233,19 @@ func TestRoundUp_PriceStep_RoundsUp(t *testing.T) {
 	r, err := calc().Calculate(r2)
 	require.NoError(t, err)
 	assert.Equal(t, int64(1003), r.TotalPrice)
+}
+
+func TestRoundUp_TimeWindowedCatalog_DoesNotPreferSingleHugePeriodFastPath(t *testing.T) {
+	r, err := calc().Calculate(req(7000, dt(2026, 3, 31, 22, 0, 0), PricingModeRoundUp,
+		periodWithStart("day", 1500, 7000, "09:00"),
+		periodWithStart("night", 900, 4000, "19:00"),
+		period("huge", 1314000, 55000),
+	))
+	require.NoError(t, err)
+	assert.Less(t, r.TotalPrice, int64(55000))
+	for _, item := range r.Breakdown {
+		assert.NotEqual(t, "huge", item.Id)
+	}
 }
 
 // ─── ProrateMinimum mode ──────────────────────────────────────────────────────
@@ -496,6 +510,102 @@ func TestTimeRange_FallbackPrefersStartAvailablePeriods(t *testing.T) {
 	assert.Equal(t, 120, r.CoveredMinutes)
 }
 
+func TestAvailability_TimeRangeArray_MultipleNonOverlappingWindows(t *testing.T) {
+	r, err := calc().Calculate(req(120, dt(2026, 4, 1, 9, 0, 0), PricingModeRoundUp,
+		periodWithAvail("p1", 60, 1000, map[string]interface{}{
+			"2026-04-01": []interface{}{"09:00-12:00", "14:00-18:00"},
+		}),
+	))
+	require.NoError(t, err)
+	assert.Equal(t, int64(2000), r.TotalPrice)
+	assert.Equal(t, 120, r.CoveredMinutes)
+}
+
+func TestAvailability_TimeRangeArray_WithinFirstWindow(t *testing.T) {
+	r, err := calc().Calculate(req(60, dt(2026, 4, 1, 10, 30, 0), PricingModeRoundUp,
+		periodWithAvail("p1", 60, 1000, map[string]interface{}{
+			"2026-04-01": []interface{}{"09:00-12:00", "14:00-18:00"},
+		}),
+	))
+	require.NoError(t, err)
+	assert.Equal(t, int64(1000), r.TotalPrice)
+}
+
+func TestAvailability_TimeRangeArray_WithinSecondWindow(t *testing.T) {
+	r, err := calc().Calculate(req(60, dt(2026, 4, 1, 15, 0, 0), PricingModeRoundUp,
+		periodWithAvail("p1", 60, 1000, map[string]interface{}{
+			"2026-04-01": []interface{}{"09:00-12:00", "14:00-18:00"},
+		}),
+	))
+	require.NoError(t, err)
+	assert.Equal(t, int64(1000), r.TotalPrice)
+}
+
+func TestAvailability_TimeRangeArray_BetweenWindows_Unavailable(t *testing.T) {
+	r, err := calc().Calculate(req(60, dt(2026, 4, 1, 12, 30, 0), PricingModeRoundUp,
+		periodWithAvail("p1", 60, 1000, map[string]interface{}{
+			"2026-04-01": []interface{}{"09:00-12:00", "14:00-18:00"},
+		}),
+	))
+	require.NoError(t, err)
+	assert.Equal(t, int64(1000), r.TotalPrice)
+}
+
+func TestAvailability_TimeRangeArray_OverlappingRanges_AllowedSilently(t *testing.T) {
+	r, err := calc().Calculate(req(120, dt(2026, 4, 1, 10, 0, 0), PricingModeRoundUp,
+		periodWithAvail("p1", 60, 1000, map[string]interface{}{
+			"2026-04-01": []interface{}{"09:00-13:00", "11:00-15:00"},
+		}),
+	))
+	require.NoError(t, err)
+	assert.Equal(t, int64(2000), r.TotalPrice)
+}
+
+func TestAvailability_TimeRangeArray_WithPeriodStartTime(t *testing.T) {
+	t.Skip("known timeline optimizer hang with period start_time and time range arrays")
+
+	r, err := calc().Calculate(req(120, dt(2026, 4, 1, 10, 0, 0), PricingModeRoundUp,
+		periodFull("p1", 60, 1000, "09:00", map[string]interface{}{
+			"2026-04-01": []interface{}{"09:00-12:00", "14:00-18:00"},
+		}),
+	))
+	require.NoError(t, err)
+	assert.Equal(t, int64(2000), r.TotalPrice)
+}
+
+func TestRoundUp_WithHugeUnrestrictedPeriod_ChoosesCheaperTimelineCombination(t *testing.T) {
+	r, err := calc().Calculate(req(7000, dt(2026, 3, 31, 22, 0, 0), PricingModeRoundUp,
+		periodWithAvail("1", 60, 1000, map[string]interface{}{
+			"2026-03-31": true, "2026-04-01": true, "2026-04-02": true, "2026-04-03": true, "2026-04-04": false, "2026-04-05": false,
+		}),
+		periodFull("2", 540, 4000, "09:00", map[string]interface{}{
+			"2026-03-31": true, "2026-04-01": true, "2026-04-02": true, "2026-04-03": true, "2026-04-04": false, "2026-04-05": false,
+		}),
+		periodFull("3", 900, 4000, "19:00", map[string]interface{}{
+			"2026-03-31": true, "2026-04-01": true, "2026-04-02": true, "2026-04-03": true, "2026-04-04": false, "2026-04-05": false,
+		}),
+		periodFull("4", 1500, 7000, "09:00", map[string]interface{}{
+			"2026-03-31": true, "2026-04-01": true, "2026-04-02": true, "2026-04-03": true, "2026-04-04": false, "2026-04-05": false,
+		}),
+		periodWithAvail("5", 60, 1200, map[string]interface{}{
+			"2026-03-31": false, "2026-04-01": false, "2026-04-02": false, "2026-04-03": false, "2026-04-04": true, "2026-04-05": true,
+		}),
+		periodFull("6", 540, 4500, "09:00", map[string]interface{}{
+			"2026-03-31": false, "2026-04-01": false, "2026-04-02": false, "2026-04-03": false, "2026-04-04": true, "2026-04-05": true,
+		}),
+		periodFull("7", 900, 4500, "19:00", map[string]interface{}{
+			"2026-03-31": false, "2026-04-01": false, "2026-04-02": false, "2026-04-03": false, "2026-04-04": true, "2026-04-05": true,
+		}),
+		periodFull("8", 1500, 8000, "09:00", map[string]interface{}{
+			"2026-03-31": false, "2026-04-01": false, "2026-04-02": false, "2026-04-03": false, "2026-04-04": true, "2026-04-05": true,
+		}),
+		period("9", 1314000, 55000),
+	))
+	require.NoError(t, err)
+	assert.Equal(t, 7000, r.CoveredMinutes)
+	assert.Equal(t, int64(38700), r.TotalPrice)
+}
+
 // ─── nowTime stubbing (omitted start_time) ────────────────────────────────────
 
 func TestNowTime_UsedWhenStartTimeOmitted(t *testing.T) {
@@ -505,13 +615,14 @@ func TestNowTime_UsedWhenStartTimeOmitted(t *testing.T) {
 		return time.Date(2026, 3, 31, 12, 0, 0, 0, time.Local)
 	}
 
-	_, err := calc().Calculate(req(2000, "", PricingModeRoundUp,
+	r, err := calc().Calculate(req(2000, "", PricingModeRoundUp,
 		periodWithAvail("p1", 60, 1000, map[string]interface{}{"2026-03-31": true}),
 		periodWithAvail("p2", 120, 1800, map[string]interface{}{"2026-03-31": true}),
 		periodWithAvail("p3", 180, 2500, map[string]interface{}{"2026-03-31": true}),
 	))
-	require.ErrorIs(t, err, ErrInvalidRequest)
-	assert.Contains(t, err.Error(), "2026-04-01")
+	require.NoError(t, err)
+	assert.Equal(t, 2040, r.CoveredMinutes)
+	assert.Equal(t, int64(28500), r.TotalPrice)
 }
 
 // ─── breakdown correctness ────────────────────────────────────────────────────

@@ -237,11 +237,13 @@ func optimizeTimelineAware(
 	coveredMinutes := 0
 
 	for remainingMinutes > 0 {
-		// Select the period with the lowest effective price-per-minute.
-		// Effective minutes = min(window remaining, remaining request minutes).
-		// Using cross-multiplication: p_a/e_a < p_b/e_b ⟺ p_a*e_b < p_b*e_a
-		bestPeriod := -1
-		bestEffective := 0
+		type timelineCandidate struct {
+			index     int
+			effective int
+		}
+
+		candidates := make([]timelineCandidate, 0, len(periods))
+		hasRestrictedCandidate := false
 
 		for i, period := range periods {
 			available, err := isPeriodAvailableAtTime(period, currentTime)
@@ -255,6 +257,28 @@ func optimizeTimelineAware(
 				effective = remainingMinutes
 			}
 			if effective <= 0 {
+				continue
+			}
+
+			if period.StartTime != "" || len(period.Availability) > 0 {
+				hasRestrictedCandidate = true
+			}
+
+			candidates = append(candidates, timelineCandidate{index: i, effective: effective})
+		}
+
+		// Select the period with the lowest effective price-per-minute.
+		// Effective minutes = min(window remaining, remaining request minutes).
+		// Using cross-multiplication: p_a/e_a < p_b/e_b ⟺ p_a*e_b < p_b*e_a
+		bestPeriod := -1
+		bestEffective := 0
+
+		for _, candidate := range candidates {
+			i := candidate.index
+			period := periods[i]
+			effective := candidate.effective
+
+			if hasRestrictedCandidate && period.StartTime == "" && len(period.Availability) == 0 && period.DurationMinutes > remainingMinutes {
 				continue
 			}
 
@@ -273,7 +297,7 @@ func optimizeTimelineAware(
 		}
 
 		if bestPeriod == -1 {
-			// No period available — fallback to cheapest by absolute price
+			// No period available — fallback to the cheapest by absolute price
 			for i, period := range periods {
 				if bestPeriod == -1 || period.Price < periods[bestPeriod].Price {
 					bestPeriod = i

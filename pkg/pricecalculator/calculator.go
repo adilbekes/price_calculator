@@ -89,13 +89,26 @@ func (c *calculator) Calculate(req CalculateRequest) (CalculateResult, error) {
 	timelinePeriods := normalizedReq.Periods
 	if hasTimeBasedRestrictions {
 		timelinePeriods = req.Periods
+		if normalizedReq.PricingMode == PricingModeRoundUp {
+			trimmedPeriods := make([]PricingPeriod, 0, len(timelinePeriods))
+			for _, period := range timelinePeriods {
+				isOversizedUnrestricted := period.StartTime == "" && len(period.Availability) == 0 && period.DurationMinutes > normalizedReq.RequestedDurationMinutes
+				if isOversizedUnrestricted {
+					continue
+				}
+				trimmedPeriods = append(trimmedPeriods, period)
+			}
+			if len(trimmedPeriods) > 0 {
+				timelinePeriods = trimmedPeriods
+			}
+		}
 	}
 
 	// If there's a single period that covers the entire request, pick the cheapest one
 	// instead of using timeline-aware optimization
 	// Only use single-period optimization for RoundUp mode when a single full period covers the request
 	// and the period doesn't have time window constraints
-	if normalizedReq.PricingMode == PricingModeRoundUp {
+	if normalizedReq.PricingMode == PricingModeRoundUp && !hasTimeBasedRestrictions {
 		var singleCoveringPeriod *PricingPeriod
 		var cheapestPrice int64
 		for i, period := range timelinePeriods {
@@ -146,7 +159,11 @@ func (c *calculator) Calculate(req CalculateRequest) (CalculateResult, error) {
 		}
 	}
 
-	minimumDuration := minDuration(normalizedReq.Periods)
+	minimumDurationPeriods := normalizedReq.Periods
+	if hasTimeBasedRestrictions {
+		minimumDurationPeriods = timelinePeriods
+	}
+	minimumDuration := minDuration(minimumDurationPeriods)
 
 	var result CalculateResult
 	var err error

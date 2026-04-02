@@ -147,11 +147,8 @@ func validatePeriodsAvailability(periods []PricingPeriod, intervalStart time.Tim
 			dateStr := day.Format(time.DateOnly)
 			availability, exists := period.Availability[dateStr]
 			if !exists {
-				return NewRequestError(
-					"period '%s' availability must define date %s for the requested interval",
-					period.Identifier(),
-					dateStr,
-				)
+				// Missing dates default to available all day.
+				continue
 			}
 
 			if _, _, _, err := availabilityWindowForDate(day, availability); err != nil {

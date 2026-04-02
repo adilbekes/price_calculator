@@ -25,6 +25,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -38,12 +39,8 @@ type errorResponse struct {
 	Error string `json:"error"`
 }
 
-func writeError(msg string) {
-	_ = json.NewEncoder(os.Stdout).Encode(errorResponse{Error: msg})
-}
-
-func writeErrorToStderr(msg string) {
-	_ = json.NewEncoder(os.Stderr).Encode(errorResponse{Error: msg})
+func writeErrorToStderr(msg string) error {
+	return json.NewEncoder(os.Stderr).Encode(errorResponse{Error: msg})
 }
 
 func writeErrorToFile(filename string, msg string) error {
@@ -51,14 +48,32 @@ func writeErrorToFile(filename string, msg string) error {
 	if err != nil {
 		return err
 	}
-	defer file.Close()
-	return json.NewEncoder(file).Encode(errorResponse{Error: msg})
+
+	if err := json.NewEncoder(file).Encode(errorResponse{Error: msg}); err != nil {
+		closeErr := file.Close()
+		if closeErr != nil {
+			return fmt.Errorf("encode error: %v; close error: %w", err, closeErr)
+		}
+		return err
+	}
+
+	if err := file.Close(); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func reportError(msg string, outputFile string) {
-	writeErrorToStderr(msg)
+	if err := writeErrorToStderr(msg); err != nil {
+		// Nothing safer to do if writing to stderr itself fails.
+	}
 	if outputFile != "" {
-		_ = writeErrorToFile(outputFile, msg)
+		if err := writeErrorToFile(outputFile, msg); err != nil {
+			if stderrErr := writeErrorToStderr(fmt.Sprintf("failed to write error file: %s", err)); stderrErr != nil {
+				// Nothing safer to do if writing to stderr itself fails.
+			}
+		}
 	}
 }
 
@@ -80,13 +95,12 @@ func main() {
 		inputData = strings.NewReader(*dataFlag)
 	} else if *fileFlag != "" {
 		// File argument provided
-		file, err := os.Open(*fileFlag)
+		content, err := os.ReadFile(*fileFlag)
 		if err != nil {
 			reportError(fmt.Sprintf("failed to open file: %s", err), *outputFlag)
 			os.Exit(1)
 		}
-		defer file.Close()
-		inputData = file
+		inputData = bytes.NewReader(content)
 	} else {
 		// Default to stdin
 		inputData = os.Stdin
@@ -112,14 +126,25 @@ func main() {
 			reportError(fmt.Sprintf("failed to create output file: %s", err), *outputFlag)
 			os.Exit(1)
 		}
-		defer file.Close()
+
 		if err := json.NewEncoder(file).Encode(result); err != nil {
+			if closeErr := file.Close(); closeErr != nil {
+				reportError(fmt.Sprintf("failed to close output file: %s", closeErr), *outputFlag)
+				os.Exit(1)
+			}
 			reportError(fmt.Sprintf("failed to encode result: %s", err), *outputFlag)
+			os.Exit(1)
+		}
+
+		if err := file.Close(); err != nil {
+			reportError(fmt.Sprintf("failed to close output file: %s", err), *outputFlag)
 			os.Exit(1)
 		}
 	} else {
 		if err := json.NewEncoder(os.Stdout).Encode(result); err != nil {
-			writeErrorToStderr(fmt.Sprintf("failed to encode result: %s", err))
+			if stderrErr := writeErrorToStderr(fmt.Sprintf("failed to encode result: %s", err)); stderrErr != nil {
+				// Nothing safer to do if writing to stderr itself fails.
+			}
 			os.Exit(1)
 		}
 	}

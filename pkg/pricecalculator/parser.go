@@ -96,53 +96,6 @@ func isAfterOrAtPeriodStartTime(period PricingPeriod, checkTime time.Time) (bool
 	return checkTime.Equal(start) || checkTime.After(start), nil
 }
 
-// getPeriodWindowOverlapMinutes computes how many minutes of a period are usable within a given request interval.
-// When a period has start_time and duration, it defines a daily window [start_time, start_time + duration].
-// This function returns the overlap between that window and the request interval for each day.
-// If no overlap or period has no start_time, returns the full period duration.
-func getPeriodWindowOverlapMinutes(period PricingPeriod, intervalStart, intervalEnd time.Time) (int, error) {
-	if period.StartTime == "" {
-		return period.DurationMinutes, nil
-	}
-
-	hour, minute, err := parseTimeHHMM(period.StartTime)
-	if err != nil {
-		return 0, err
-	}
-
-	loc := timeLocation(intervalStart)
-	totalOverlapMinutes := 0
-
-	// Check overlap for each day in the interval
-	for _, day := range touchedDates(intervalStart, intervalEnd) {
-		windowStart := time.Date(day.Year(), day.Month(), day.Day(), hour, minute, 0, 0, loc)
-		windowEnd := windowStart.Add(time.Duration(period.DurationMinutes) * time.Minute)
-
-		// Clamp window to the request interval
-		overlapStart := windowStart
-		if overlapStart.Before(intervalStart) {
-			overlapStart = intervalStart
-		}
-
-		overlapEnd := windowEnd
-		if overlapEnd.After(intervalEnd) {
-			overlapEnd = intervalEnd
-		}
-
-		// If there's overlap on this day, add it
-		if overlapEnd.After(overlapStart) {
-			totalOverlapMinutes += int(overlapEnd.Sub(overlapStart).Minutes())
-		}
-	}
-
-	// If no overlap at all, we can't use this period for the interval
-	if totalOverlapMinutes == 0 {
-		return 0, nil
-	}
-
-	return totalOverlapMinutes, nil
-}
-
 func touchedDates(start time.Time, end time.Time) []time.Time {
 	if !end.After(start) {
 		return nil
@@ -180,6 +133,34 @@ func availabilityWindowForDate(date time.Time, availability interface{}) (bool, 
 			return false, time.Time{}, time.Time{}, err
 		}
 		return true, windowStart, windowEnd, nil
+	}
+
+	if timeRanges, ok := availability.([]interface{}); ok {
+		if len(timeRanges) == 0 {
+			return false, time.Time{}, time.Time{}, NewRequestError("availability time range array cannot be empty")
+		}
+		earliestStart := time.Time{}
+		latestEnd := time.Time{}
+
+		for _, rangeVal := range timeRanges {
+			rangeStr, ok := rangeVal.(string)
+			if !ok {
+				return false, time.Time{}, time.Time{}, NewRequestError("each time range in array must be a string, got %T", rangeVal)
+			}
+
+			windowStart, windowEnd, err := parseTimeRangeForDate(date, rangeStr)
+			if err != nil {
+				return false, time.Time{}, time.Time{}, err
+			}
+
+			if earliestStart.IsZero() || windowStart.Before(earliestStart) {
+				earliestStart = windowStart
+			}
+			if latestEnd.IsZero() || windowEnd.After(latestEnd) {
+				latestEnd = windowEnd
+			}
+		}
+		return true, earliestStart, latestEnd, nil
 	}
 
 	return false, time.Time{}, time.Time{}, NewRequestError(
@@ -249,11 +230,8 @@ func isPeriodAvailableForInterval(period PricingPeriod, start time.Time, end tim
 		dateStr := day.Format(time.DateOnly)
 		availability, exists := period.Availability[dateStr]
 		if !exists {
-			return false, NewRequestError(
-				"period '%s' availability must define date %s for the requested interval",
-				period.Identifier(),
-				dateStr,
-			)
+			// Missing dates default to available all day.
+			continue
 		}
 
 		if _, _, _, err := availabilityWindowForDate(day, availability); err != nil {
@@ -263,7 +241,11 @@ func isPeriodAvailableForInterval(period PricingPeriod, start time.Time, end tim
 
 	for _, day := range days {
 		dateStr := day.Format(time.DateOnly)
-		availability := period.Availability[dateStr]
+		availability, exists := period.Availability[dateStr]
+		if !exists {
+			// Missing dates default to available all day.
+			continue
+		}
 		available, windowStart, windowEnd, err := availabilityWindowForDate(day, availability)
 		if err != nil {
 			return false, NewRequestError("period '%s': %s", period.Identifier(), err.Error())
@@ -311,7 +293,7 @@ func isPeriodAvailableAtTime(period PricingPeriod, checkTime time.Time) (bool, e
 	// Check if date exists in availability map
 	availability, exists := period.Availability[dateStr]
 	if !exists {
-		return false, nil // Date not in map means not available
+		return true, nil // Missing date defaults to available
 	}
 
 	// Handle boolean values
@@ -322,6 +304,27 @@ func isPeriodAvailableAtTime(period PricingPeriod, checkTime time.Time) (bool, e
 	// Handle time range strings (e.g., "10:00-18:00")
 	if timeRangeStr, ok := availability.(string); ok {
 		return isTimeWithinRange(checkTime, timeRangeStr)
+	}
+
+	// Handle time range arrays (e.g., ["09:00-12:00", "14:00-18:00"])
+	if timeRanges, ok := availability.([]interface{}); ok {
+		if len(timeRanges) == 0 {
+			return false, NewRequestError("availability time range array cannot be empty")
+		}
+		for _, rangeVal := range timeRanges {
+			rangeStr, ok := rangeVal.(string)
+			if !ok {
+				return false, NewRequestError("each time range in array must be a string")
+			}
+			within, err := isTimeWithinRange(checkTime, rangeStr)
+			if err != nil {
+				return false, err
+			}
+			if within {
+				return true, nil
+			}
+		}
+		return false, nil
 	}
 
 	return false, NewRequestError("period[%s]: availability value for %s must be boolean or time range string (e.g., '10:00-18:00')",
