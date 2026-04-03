@@ -697,3 +697,94 @@ func TestBreakdown_WindowPeriod_UsedDurationReflectsChargedPeriodInRoundUp(t *te
 		}
 	}
 }
+
+// ─── availability edge cases ──────────────────────────────────────────────────
+
+func TestValidation_EmptyAvailabilityArray_ReturnsError(t *testing.T) {
+	_, err := calc().Calculate(req(60, dt(2026, 4, 1, 10, 0, 0), PricingModeRoundUp,
+		periodWithAvail("p1", 60, 1000, map[string]interface{}{
+			"2026-04-01": []interface{}{},
+		}),
+	))
+	assert.Error(t, err)
+}
+
+func TestValidation_NonStringElementInAvailabilityArray_ReturnsError(t *testing.T) {
+	_, err := calc().Calculate(req(60, dt(2026, 4, 1, 10, 0, 0), PricingModeRoundUp,
+		periodWithAvail("p1", 60, 1000, map[string]interface{}{
+			"2026-04-01": []interface{}{true},
+		}),
+	))
+	assert.Error(t, err)
+}
+
+func TestValidation_AvailabilityTimeRange_InvalidFormat_ReturnsError(t *testing.T) {
+	_, err := calc().Calculate(req(60, dt(2026, 4, 1, 10, 0, 0), PricingModeRoundUp,
+		periodWithAvail("p1", 60, 1000, map[string]interface{}{
+			"2026-04-01": "10:00",
+		}),
+	))
+	assert.Error(t, err)
+}
+
+func TestValidation_AvailabilityTimeRange_InvalidStartMinute_ReturnsError(t *testing.T) {
+	_, err := calc().Calculate(req(60, dt(2026, 4, 1, 10, 0, 0), PricingModeRoundUp,
+		periodWithAvail("p1", 60, 1000, map[string]interface{}{
+			"2026-04-01": "10:60-11:00",
+		}),
+	))
+	assert.Error(t, err)
+}
+
+func TestValidation_AvailabilityTimeRange_InvalidEndHour_ReturnsError(t *testing.T) {
+	_, err := calc().Calculate(req(60, dt(2026, 4, 1, 10, 0, 0), PricingModeRoundUp,
+		periodWithAvail("p1", 60, 1000, map[string]interface{}{
+			"2026-04-01": "10:00-25:00",
+		}),
+	))
+	assert.Error(t, err)
+}
+
+func TestValidation_ZeroPricePeriod_IsAllowed(t *testing.T) {
+	r, err := calc().Calculate(req(60, "", PricingModeRoundUp, period("p1", 60, 0)))
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), r.TotalPrice)
+}
+
+func TestValidation_PeriodDurationZero_ReturnsPeriodsError(t *testing.T) {
+	_, err := calc().Calculate(req(60, "", PricingModeRoundUp,
+		PricingPeriod{Id: "p1", DurationMinutes: 0, Price: 1000},
+	))
+	assert.ErrorIs(t, err, ErrInvalidPeriods)
+}
+
+// ─── start_time reproducibility ───────────────────────────────────────────────
+
+func TestStartTime_Provided_ResultIsReproducible(t *testing.T) {
+	r1, err1 := calc().Calculate(req(60, "2026-04-01 10:00:00", PricingModeRoundUp, period("p1", 60, 1000)))
+	r2, err2 := calc().Calculate(req(60, "2026-04-01 10:00:00", PricingModeRoundUp, period("p1", 60, 1000)))
+	require.NoError(t, err1)
+	require.NoError(t, err2)
+	assert.Equal(t, r1.TotalPrice, r2.TotalPrice)
+	assert.Equal(t, r1.StartTime, r2.StartTime)
+	assert.Equal(t, r1.EndTime, r2.EndTime)
+	assert.Equal(t, r1.CoveredMinutes, r2.CoveredMinutes)
+}
+
+func TestStartTime_Provided_EchoedInResult(t *testing.T) {
+	start := "2026-04-01 10:00:00"
+	r, err := calc().Calculate(req(60, start, PricingModeRoundUp, period("p1", 60, 1000)))
+	require.NoError(t, err)
+	assert.Equal(t, start, r.StartTime)
+}
+
+func TestStartTime_Omitted_StartTimeEmptyInResult(t *testing.T) {
+	orig := nowTime
+	t.Cleanup(func() { nowTime = orig })
+	nowTime = func() time.Time { return time.Date(2026, 4, 1, 10, 0, 0, 0, time.Local) }
+
+	r, err := calc().Calculate(req(60, "", PricingModeRoundUp, period("p1", 60, 1000)))
+	require.NoError(t, err)
+	assert.Empty(t, r.StartTime)
+}
+

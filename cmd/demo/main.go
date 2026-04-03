@@ -4,24 +4,7 @@ import (
 	"fmt"
 	"log"
 	"price_calculator/pkg/pricecalculator"
-	"strings"
 )
-
-func formatPeriods(periods []pricecalculator.PricingPeriod) string {
-	parts := make([]string, len(periods))
-	for i, period := range periods {
-		parts[i] = period.String()
-	}
-	return strings.Join(parts, ", ")
-}
-
-func formatBreakdown(items []pricecalculator.BreakdownItem) string {
-	parts := make([]string, len(items))
-	for i, item := range items {
-		parts[i] = item.String()
-	}
-	return strings.Join(parts, ", ")
-}
 
 func main() {
 	calc := pricecalculator.NewCalculator()
@@ -42,7 +25,7 @@ func main() {
 	}
 
 	fmt.Printf("Requested duration: %d minutes\n", baseRequest.RequestedDurationMinutes)
-	fmt.Printf("Periods: %s\n\n", formatPeriods(baseRequest.Periods))
+	fmt.Printf("Periods: %s\n\n", pricecalculator.FormatItems(baseRequest.Periods))
 
 	for _, mode := range modes {
 		request := baseRequest
@@ -56,6 +39,6 @@ func main() {
 		fmt.Printf("Mode: %s \n", mode.String())
 		fmt.Printf("  Total price: %d💰\n", result.TotalPrice)
 		fmt.Printf("  Covered minutes: %d⏱\n", result.CoveredMinutes)
-		fmt.Printf("  Breakdown: %s\n\n", formatBreakdown(result.Breakdown))
+		fmt.Printf("  Breakdown: %s\n\n", pricecalculator.FormatItems(result.Breakdown))
 	}
 }
