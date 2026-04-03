@@ -1,0 +1,18 @@
+version: 2
+updates:
+  # Go modules
+  - package-ecosystem: "gomod"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    # Open a pull request for each update
+    pull-request-branch-name:
+      separator: "/"
+    commit-message:
+      prefix: "chore(deps):"
+      include: "scope"
+    # Automatically merge minor and patch updates
+    auto-commit-changes: true
+    # Rebase stale pull requests
+    rebase-strategy: "auto"
+
