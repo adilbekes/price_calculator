@@ -62,7 +62,7 @@ func TestPricingMode_MarshalJSON_NilPointer_ReturnsNull(t *testing.T) {
 // ─── PricingPeriod ────────────────────────────────────────────────────────────
 
 func TestPricingPeriod_String_WithStartTime_IncludesAll(t *testing.T) {
-	p := PricingPeriod{DurationMinutes: 60, Price: 1000, StartTime: "09:00"}
+	p := PricingPeriod{DurationMinutes: 60, Price: Maj(1000), StartTime: "09:00"}
 	s := p.String()
 	assert.Contains(t, s, "09:00")
 	assert.Contains(t, s, "60")
@@ -70,7 +70,7 @@ func TestPricingPeriod_String_WithStartTime_IncludesAll(t *testing.T) {
 }
 
 func TestPricingPeriod_String_WithoutStartTime_NoClock(t *testing.T) {
-	p := PricingPeriod{DurationMinutes: 60, Price: 1000}
+	p := PricingPeriod{DurationMinutes: 60, Price: Maj(1000)}
 	s := p.String()
 	assert.Contains(t, s, "60")
 	assert.Contains(t, s, "1000")
@@ -78,19 +78,19 @@ func TestPricingPeriod_String_WithoutStartTime_NoClock(t *testing.T) {
 }
 
 func TestPricingPeriod_Identifier_ReturnsId_WhenSet(t *testing.T) {
-	p := PricingPeriod{Id: "rate-a", DurationMinutes: 60, Price: 1000}
+	p := PricingPeriod{Id: "rate-a", DurationMinutes: 60, Price: Maj(1000)}
 	assert.Equal(t, "rate-a", p.Identifier())
 }
 
 func TestPricingPeriod_Identifier_FallsBackToString_WhenNoId(t *testing.T) {
-	p := PricingPeriod{DurationMinutes: 60, Price: 1000}
+	p := PricingPeriod{DurationMinutes: 60, Price: Maj(1000)}
 	assert.Equal(t, p.String(), p.Identifier())
 }
 
 // ─── BreakdownItem ────────────────────────────────────────────────────────────
 
 func TestBreakdownItem_String_FullMatch_ShowsQuantityAndSinglePair(t *testing.T) {
-	bi := BreakdownItem{Quantity: 3, DurationMinutes: 60, UsedDuration: 60, Price: 1000, UsedPrice: 1000}
+	bi := BreakdownItem{Quantity: 3, DurationMinutes: 60, UsedDuration: 60, Price: Maj(1000), UsedPrice: Maj(1000)}
 	s := bi.String()
 	assert.Contains(t, s, "3")
 	assert.Contains(t, s, "60")
@@ -98,7 +98,7 @@ func TestBreakdownItem_String_FullMatch_ShowsQuantityAndSinglePair(t *testing.T)
 }
 
 func TestBreakdownItem_String_DurationAndPriceBothDiffer_ShowsBothPairs(t *testing.T) {
-	bi := BreakdownItem{Quantity: 1, DurationMinutes: 60, UsedDuration: 30, Price: 1000, UsedPrice: 500}
+	bi := BreakdownItem{Quantity: 1, DurationMinutes: 60, UsedDuration: 30, Price: Maj(1000), UsedPrice: Maj(500)}
 	s := bi.String()
 	assert.Contains(t, s, "30")
 	assert.Contains(t, s, "60")
@@ -107,7 +107,7 @@ func TestBreakdownItem_String_DurationAndPriceBothDiffer_ShowsBothPairs(t *testi
 }
 
 func TestBreakdownItem_String_DurationDiffersButPriceSame_ShowsBothDurations(t *testing.T) {
-	bi := BreakdownItem{Quantity: 1, DurationMinutes: 60, UsedDuration: 30, Price: 1000, UsedPrice: 1000}
+	bi := BreakdownItem{Quantity: 1, DurationMinutes: 60, UsedDuration: 30, Price: Maj(1000), UsedPrice: Maj(1000)}
 	s := bi.String()
 	assert.Contains(t, s, "30")
 	assert.Contains(t, s, "60")
@@ -115,7 +115,7 @@ func TestBreakdownItem_String_DurationDiffersButPriceSame_ShowsBothDurations(t *
 
 func TestBreakdownItem_String_WithStartAndEndTime_IncludesTimestamps(t *testing.T) {
 	bi := BreakdownItem{
-		Quantity: 1, DurationMinutes: 60, UsedDuration: 60, Price: 1000, UsedPrice: 1000,
+		Quantity: 1, DurationMinutes: 60, UsedDuration: 60, Price: Maj(1000), UsedPrice: Maj(1000),
 		StartTime: "2026-04-01 09:00:00", EndTime: "2026-04-01 10:00:00",
 	}
 	s := bi.String()
@@ -124,7 +124,7 @@ func TestBreakdownItem_String_WithStartAndEndTime_IncludesTimestamps(t *testing.
 }
 
 func TestBreakdownItem_String_NoStartEndTime_OmitsArrow(t *testing.T) {
-	bi := BreakdownItem{Quantity: 1, DurationMinutes: 60, UsedDuration: 60, Price: 1000, UsedPrice: 1000}
+	bi := BreakdownItem{Quantity: 1, DurationMinutes: 60, UsedDuration: 60, Price: Maj(1000), UsedPrice: Maj(1000)}
 	assert.NotContains(t, bi.String(), "→")
 }
 

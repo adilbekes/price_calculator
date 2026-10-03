@@ -116,7 +116,7 @@ func (c *calculator) Calculate(req CalculateRequest) (CalculateResult, error) {
 	// and the period doesn't have time window constraints
 	if normalizedReq.PricingMode == PricingModeRoundUp && !hasTimeBasedRestrictions {
 		var singleCoveringPeriod *PricingPeriod
-		var cheapestPrice int64
+		var cheapestPrice Money
 		for i, period := range timelinePeriods {
 			if period.StartTime != "" {
 				// Skip periods with time windows - let timeline optimizer handle them
@@ -158,7 +158,7 @@ func (c *calculator) Calculate(req CalculateRequest) (CalculateResult, error) {
 			return CalculateResult{
 				StartTime:      originalStartTime,
 				EndTime:        effectiveStartTime.Add(time.Duration(singleCoveringPeriod.DurationMinutes) * time.Minute).Format(time.DateTime),
-				TotalPrice:     singleCoveringPeriod.Price,
+				TotalPrice:     roundUpPrice(singleCoveringPeriod.Price, effectiveTotalPriceStep(req.TotalPriceStep)),
 				CoveredMinutes: singleCoveringPeriod.DurationMinutes,
 				Breakdown:      []BreakdownItem{breakdownItem},
 			}, nil

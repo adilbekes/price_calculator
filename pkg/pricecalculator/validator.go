@@ -61,7 +61,12 @@ func validateRequestedDurationSettings(req CalculateRequest) error {
 	}
 
 	if req.TotalPriceStep < 0 {
-		return NewRequestError("price_step must be non-negative, got %d", req.TotalPriceStep)
+		return NewRequestError("price_step must be non-negative, got %s", req.TotalPriceStep)
+	}
+
+	minStep := Majf(MinPriceStepMajor)
+	if req.TotalPriceStep > 0 && req.TotalPriceStep < minStep {
+		return NewRequestError("price_step must be at least %.1f, got %s", MinPriceStepMajor, req.TotalPriceStep)
 	}
 
 	stepMinutes := effectiveRequestedDurationStepMinutes(req.RequestedDurationStepMinutes)
@@ -154,7 +159,7 @@ func validatePeriods(periods []PricingPeriod) error {
 
 		key := string(period.EffectiveType()) + "|" + period.StartTime + "|" + period.EndTime + "|" +
 			string(period.CalendarUnit) + "|" + strconv.Itoa(period.CalendarInterval) + "|" +
-			strconv.Itoa(period.DurationMinutes) + "|" + strconv.FormatInt(period.Price, 10)
+			strconv.Itoa(period.DurationMinutes) + "|" + period.Price.String()
 		if _, exists := seenPeriods[key]; exists {
 			return NewPeriodsError("period[%d]: duplicate period", i)
 		}

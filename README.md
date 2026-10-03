@@ -74,7 +74,7 @@ echo '{"duration":150,"mode":"RoundUp","periods":[{"duration":60,"price":1000}]}
 | `mode` | string | ✅ | — | See [Pricing modes](#pricing-modes) |
 | `duration_step` | int | ❌ | `5` | Duration is rounded up to this step before pricing |
 | `min_duration` | int | ❌ | `5` | Requests below this are rejected with an error |
-| `price_step` | int | ❌ | `1` | Total price is rounded up to the nearest multiple of this step (e.g. step `5`: 1084 → 1085) |
+| `price_step` | number | ❌ | `0` (no rounding) | Total price is rounded up to the nearest multiple of this step. When set, minimum is `0.1`. Example: step `0.1` turns `1000.15` into `1000.2`. |
 
 ### Period Fields
 
@@ -85,7 +85,7 @@ Each object in `periods` supports these fields. `type` is one of `duration` | `t
 | `id` | string | ❌ | Optional unique identifier (if any period has `id`, all periods must have unique `id`) |
 | `type` | string | ❌ | `duration` (default), `time_range`, or `calendar` |
 | `duration` | int | conditional | Minutes. Required for `duration`. For `time_range`: required unless `end_time` is set (then duration may be derived). Forbidden for `calendar` (resolved from calendar fields + request `start_time`). |
-| `price` | int64 | ✅ | Catalog price |
+| `price` | number | ✅ | Catalog price (int or float, up to 2 decimal places) |
 | `start_time` | string | conditional | Time-of-day `HH:MM`. Required for `time_range`. Optional daily window for `calendar` (must pair with `end_time`). Optional legacy daily window for `duration`. |
 | `end_time` | string | conditional | Time-of-day `HH:MM`. For `time_range`: optional; with `start_time` derives same-day leftover minutes. For `calendar`: required iff `start_time` is set. |
 | `calendar_unit` | string | conditional | Required for `calendar`: `day`, `week`, `month`, or `year` |

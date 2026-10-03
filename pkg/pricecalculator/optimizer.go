@@ -27,9 +27,9 @@ func optimizePrice(
 	maxPeriodDuration := maxDuration(periods)
 	searchLimit := requiredMinutes + maxPeriodDuration
 
-	const inf int64 = math.MaxInt64
+	const inf Money = Money(math.MaxInt64)
 
-	dp := make([]int64, searchLimit+1)
+	dp := make([]Money, searchLimit+1)
 	prev := make([]int, searchLimit+1)
 	used := make([]int, searchLimit+1)
 
@@ -119,7 +119,7 @@ func optimizePriceExactWithProration(
 	requiredMinutes int,
 	periods []PricingPeriod,
 ) (CalculateResult, error) {
-	const inf int64 = math.MaxInt64
+	const inf Money = Money(math.MaxInt64)
 
 	minimumDuration := minDuration(periods)
 	minimumPeriod, err := cheapestPeriodByDuration(periods, minimumDuration)
@@ -127,7 +127,7 @@ func optimizePriceExactWithProration(
 		return CalculateResult{}, err
 	}
 
-	dp := make([]int64, requiredMinutes+1)
+	dp := make([]Money, requiredMinutes+1)
 	prev := make([]int, requiredMinutes+1)
 	used := make([]int, requiredMinutes+1)
 
@@ -233,7 +233,7 @@ func optimizeTimelineAware(
 	currentTime := startTime
 	remainingMinutes := requiredMinutes
 	timeline := make([]BreakdownItem, 0)
-	totalPrice := int64(0)
+	totalPrice := Money(0)
 	coveredMinutes := 0
 
 	for remainingMinutes > 0 {
@@ -290,7 +290,7 @@ func optimizeTimelineAware(
 
 			best := periods[bestPeriod]
 			// period cheaper per minute when: period.Price * bestEffective < best.Price * effective
-			if period.Price*int64(bestEffective) < best.Price*int64(effective) {
+			if period.Price*Money(bestEffective) < best.Price*Money(effective) {
 				bestPeriod = i
 				bestEffective = effective
 			}
@@ -503,22 +503,22 @@ func ceilDivInt64(numerator, denominator int64) int64 {
 	return (numerator + denominator - 1) / denominator
 }
 
-func calculateProratedPrice(period PricingPeriod, durationMinutes int) int64 {
-	return ceilDivInt64(period.Price*int64(durationMinutes), int64(period.DurationMinutes))
+func calculateProratedPrice(period PricingPeriod, durationMinutes int) Money {
+	return Money(ceilDivInt64(int64(period.Price)*int64(durationMinutes), int64(period.DurationMinutes)))
 }
 
 func fallbackSolution(requiredMinutes int, periods []PricingPeriod) CalculateResult {
 	best := periods[0]
 	for _, period := range periods[1:] {
 		// Compare by effective price per minute using cross multiplication.
-		if period.Price*int64(best.DurationMinutes) < best.Price*int64(period.DurationMinutes) {
+		if period.Price*Money(best.DurationMinutes) < best.Price*Money(period.DurationMinutes) {
 			best = period
 		}
 	}
 
 	quantity := (requiredMinutes + best.DurationMinutes - 1) / best.DurationMinutes
 	covered := quantity * best.DurationMinutes
-	total := int64(quantity) * best.Price
+	total := Money(quantity) * best.Price
 
 	return CalculateResult{
 		TotalPrice:     total,
@@ -577,7 +577,7 @@ func mergeBreakdownItems(breakdown []BreakdownItem) []BreakdownItem {
 	for _, item := range breakdown {
 		// Merge only rows with the same pricing period AND the same usage profile.
 		// This keeps full-use items (used==duration) separate from prorated items.
-		key := [4]int64{int64(item.DurationMinutes), item.Price, int64(item.UsedDuration), item.UsedPrice}
+		key := [4]int64{int64(item.DurationMinutes), int64(item.Price), int64(item.UsedDuration), int64(item.UsedPrice)}
 		if index, exists := indexByPeriod[key]; exists {
 			merged[index].Quantity += item.Quantity
 			continue

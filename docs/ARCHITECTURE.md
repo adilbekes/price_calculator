@@ -26,7 +26,7 @@ Given a `CalculateRequest`, produce a `CalculateResult` with the optimal (cheape
 | `start_time` | `string` (`"YYYY-MM-DD HH:MM:SS"`) | ❌ | `time.Now()` | If omitted, uses local wall clock |
 | `duration_step` | `int` (minutes) | ❌ | `5` | Duration is normalized to this step |
 | `min_duration` | `int` (minutes) | ❌ | `5` | Minimum chargeable duration |
-| `price_step` | `int64` | ❌ | `1` (no rounding) | Final price is rounded up to nearest multiple |
+| `price_step` | number (int or float) | ❌ | `0` (no rounding) | Final **total** rounded up to this step; when set must be ≥ `0.1`. Breakdown lines are not stepped. |
 | `mode` | `PricingMode` (string/int) | ✅ | — | Controls proration/rounding strategy |
 | `periods` | `[]PricingPeriod` | ✅ | — | Available pricing periods |
 
@@ -36,7 +36,7 @@ Given a `CalculateRequest`, produce a `CalculateResult` with the optimal (cheape
 |---|---|---|---|
 | `id` | `string` | ❌ | If any period has an `id`, all must have unique ids |
 | `duration` | `int` (minutes) | ✅ | Must be > 0 |
-| `price` | `int64` | ✅ | Price for one full use of this period |
+| `price` | number (int or float) | ✅ | Catalog price; up to 2 decimal places |
 | `start_time` | `string` (`"HH:MM"`) | ❌ | Fixed clock start; period usable only at/after this time each day |
 | `availability` | `map[string]interface{}` | ❌ | Date-keyed availability map (see below) |
 
@@ -56,7 +56,7 @@ Given a `CalculateRequest`, produce a `CalculateResult` with the optimal (cheape
 |---|---|---|
 | `start_time` | `string` | Echoed from request if provided; omitted otherwise |
 | `end_time` | `string` (`"YYYY-MM-DD HH:MM:SS"`) | `start_time + covered minutes`; omitted if no `start_time` in request |
-| `total` | `int64` | Total price (after `price_step` rounding) |
+| `total` | number | Total price (after `price_step` rounding) |
 | `covered` | `int` | Total minutes covered by the breakdown |
 | `breakdown` | `[]BreakdownItem` | Per-period usage details |
 

@@ -159,29 +159,30 @@ func TestNormalizeDuration_ExactMultiple_Unchanged(t *testing.T) {
 
 // ─── roundUpPrice ─────────────────────────────────────────────────────────────
 
-func TestRoundUpPrice_StepOne_ReturnsUnchanged(t *testing.T) {
-	assert.Equal(t, int64(1003), roundUpPrice(1003, 1))
-}
-
-func TestRoundUpPrice_StepZero_TreatedAsStepOne(t *testing.T) {
-	assert.Equal(t, int64(1003), roundUpPrice(1003, 0))
+func TestRoundUpPrice_StepZero_ReturnsUnchanged(t *testing.T) {
+	assert.Equal(t, Maj(1003), roundUpPrice(Maj(1003), 0))
 }
 
 func TestRoundUpPrice_AlreadyMultipleOfStep_Unchanged(t *testing.T) {
-	assert.Equal(t, int64(1000), roundUpPrice(1000, 10))
+	assert.Equal(t, Maj(1000), roundUpPrice(Maj(1000), Maj(10)))
 }
 
 func TestRoundUpPrice_NotAligned_RoundsUpToNextMultiple(t *testing.T) {
-	assert.Equal(t, int64(1010), roundUpPrice(1001, 10))
-	assert.Equal(t, int64(1010), roundUpPrice(1009, 10))
+	assert.Equal(t, Maj(1010), roundUpPrice(Maj(1001), Maj(10)))
+	assert.Equal(t, Maj(1010), roundUpPrice(Maj(1009), Maj(10)))
+}
+
+func TestRoundUpPrice_FractionalStep_RoundsUp(t *testing.T) {
+	assert.Equal(t, Majf(10.1), roundUpPrice(Majf(10.03), Majf(0.1)))
+	assert.Equal(t, Majf(10.1), roundUpPrice(Majf(10.1), Majf(0.1)))
 }
 
 func TestRoundUpPrice_LargeStep_RoundsUpCorrectly(t *testing.T) {
-	assert.Equal(t, int64(500), roundUpPrice(1, 500))
+	assert.Equal(t, Maj(500), roundUpPrice(Maj(1), Maj(500)))
 }
 
 func TestRoundUpPrice_ZeroPrice_ReturnsZero(t *testing.T) {
-	assert.Equal(t, int64(0), roundUpPrice(0, 10))
+	assert.Equal(t, Money(0), roundUpPrice(0, Maj(10)))
 }
 
 // ─── touchedDates ─────────────────────────────────────────────────────────────
@@ -321,10 +322,10 @@ func TestEffectiveMinimumDuration_NonZeroInput_PassesThrough(t *testing.T) {
 }
 
 func TestEffectiveTotalPriceStep_ZeroInput_ReturnsDefault(t *testing.T) {
-	assert.Equal(t, int64(defaultTotalPriceStep), effectiveTotalPriceStep(0))
+	assert.Equal(t, defaultTotalPriceStep, effectiveTotalPriceStep(0))
 }
 
 func TestEffectiveTotalPriceStep_NonZeroInput_PassesThrough(t *testing.T) {
-	assert.Equal(t, int64(50), effectiveTotalPriceStep(50))
+	assert.Equal(t, Maj(50), effectiveTotalPriceStep(Maj(50)))
 }
 

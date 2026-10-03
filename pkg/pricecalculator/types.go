@@ -93,8 +93,8 @@ type PricingPeriod struct {
 	// DurationMinutes is required for duration/time_range (or derived from
 	// start_time+end_time for same-day time_range). For calendar it is resolved
 	// at calculation time from calendar_unit/calendar_interval and must be omitted.
-	DurationMinutes int `json:"duration,omitempty"`
-	Price           int64 `json:"price"`
+	DurationMinutes int   `json:"duration,omitempty"`
+	Price           Money `json:"price"`
 	// Optional fixed clock start (HH:MM). Required for time_range.
 	StartTime string `json:"start_time,omitempty"`
 	// Optional fixed clock end (HH:MM). For time_range may derive duration;
@@ -121,7 +121,7 @@ func (pp PricingPeriod) EffectiveType() PeriodType {
 func (pp PricingPeriod) String() string {
 	switch pp.EffectiveType() {
 	case PeriodTypeCalendar:
-		base := fmt.Sprintf("%d%s - %d💰", pp.CalendarInterval, pp.CalendarUnit, pp.Price)
+		base := fmt.Sprintf("%d%s - %s💰", pp.CalendarInterval, pp.CalendarUnit, pp.Price)
 		if pp.StartTime != "" {
 			if pp.EndTime != "" {
 				return fmt.Sprintf("%s→%s %s", pp.StartTime, pp.EndTime, base)
@@ -131,17 +131,17 @@ func (pp PricingPeriod) String() string {
 		return base
 	case PeriodTypeTimeRange:
 		if pp.EndTime != "" {
-			return fmt.Sprintf("%s→%s (%d⏱) - %d💰", pp.StartTime, pp.EndTime, pp.DurationMinutes, pp.Price)
+			return fmt.Sprintf("%s→%s (%d⏱) - %s💰", pp.StartTime, pp.EndTime, pp.DurationMinutes, pp.Price)
 		}
 		if pp.StartTime != "" {
-			return fmt.Sprintf("%s + %d⏱ - %d💰", pp.StartTime, pp.DurationMinutes, pp.Price)
+			return fmt.Sprintf("%s + %d⏱ - %s💰", pp.StartTime, pp.DurationMinutes, pp.Price)
 		}
-		return fmt.Sprintf("%d⏱ - %d💰", pp.DurationMinutes, pp.Price)
+		return fmt.Sprintf("%d⏱ - %s💰", pp.DurationMinutes, pp.Price)
 	default:
 		if pp.StartTime != "" {
-			return fmt.Sprintf("%s + %d⏱ - %d💰", pp.StartTime, pp.DurationMinutes, pp.Price)
+			return fmt.Sprintf("%s + %d⏱ - %s💰", pp.StartTime, pp.DurationMinutes, pp.Price)
 		}
-		return fmt.Sprintf("%d⏱ - %d💰", pp.DurationMinutes, pp.Price)
+		return fmt.Sprintf("%d⏱ - %s💰", pp.DurationMinutes, pp.Price)
 	}
 }
 
@@ -160,15 +160,17 @@ type CalculateRequest struct {
 	RequestedMinimumDurationMinutes int             `json:"min_duration,omitempty"`
 	Periods                         []PricingPeriod `json:"periods"`
 	PricingMode                     PricingMode     `json:"mode"`
-	TotalPriceStep                  int64           `json:"price_step,omitempty"` // optional; defaults to 1 when zero (no rounding)
+	// TotalPriceStep rounds the final total up to this major-unit step.
+	// Omitted/0 = no rounding. When set, must be >= 0.1.
+	TotalPriceStep Money `json:"price_step,omitempty"`
 }
 
 type BreakdownItem struct {
 	Id              string `json:"id,omitempty"`
 	DurationMinutes int    `json:"duration"`      // Period's catalog duration
 	UsedDuration    int    `json:"used_duration"` // Actual minutes used; defaults to duration for non-prorated items
-	Price           int64  `json:"price"`         // Period's catalog price
-	UsedPrice       int64  `json:"used_price"`    // Actual charged price for the used minutes; defaults to price
+	Price           Money  `json:"price"`         // Period's catalog price
+	UsedPrice       Money  `json:"used_price"`    // Actual charged price for the used minutes; defaults to price
 	Quantity        int    `json:"quantity"`
 	StartTime       string `json:"start_time,omitempty"` // Actual start time when this period is used (if period has start_time)
 	EndTime         string `json:"end_time,omitempty"`   // Actual end time when this period is used (if period has start_time)
@@ -182,25 +184,25 @@ func (bi BreakdownItem) String() string {
 			if bi.StartTime != "" && bi.EndTime != "" {
 				timeInfo = fmt.Sprintf(" %s→%s", bi.StartTime, bi.EndTime)
 			}
-			return fmt.Sprintf("%dx[%d/%d⏱ - %d/%d💰]%s", bi.Quantity, bi.UsedDuration, bi.DurationMinutes, bi.UsedPrice, bi.Price, timeInfo)
+			return fmt.Sprintf("%dx[%d/%d⏱ - %s/%s💰]%s", bi.Quantity, bi.UsedDuration, bi.DurationMinutes, bi.UsedPrice, bi.Price, timeInfo)
 		}
 		timeInfo := ""
 		if bi.StartTime != "" && bi.EndTime != "" {
 			timeInfo = fmt.Sprintf(" %s→%s", bi.StartTime, bi.EndTime)
 		}
-		return fmt.Sprintf("%dx[%d/%d⏱ - %d💰]%s", bi.Quantity, bi.UsedDuration, bi.DurationMinutes, bi.Price, timeInfo)
+		return fmt.Sprintf("%dx[%d/%d⏱ - %s💰]%s", bi.Quantity, bi.UsedDuration, bi.DurationMinutes, bi.Price, timeInfo)
 	}
 	timeInfo := ""
 	if bi.StartTime != "" && bi.EndTime != "" {
 		timeInfo = fmt.Sprintf(" %s→%s", bi.StartTime, bi.EndTime)
 	}
-	return fmt.Sprintf("%dx[%d⏱ - %d💰]%s", bi.Quantity, bi.DurationMinutes, bi.Price, timeInfo)
+	return fmt.Sprintf("%dx[%d⏱ - %s💰]%s", bi.Quantity, bi.DurationMinutes, bi.Price, timeInfo)
 }
 
 type CalculateResult struct {
 	StartTime      string          `json:"start_time,omitempty"` // Datetime string if provided in request
 	EndTime        string          `json:"end_time,omitempty"`   // Calculated as start_time + (duration * 60)
-	TotalPrice     int64           `json:"total"`
+	TotalPrice     Money           `json:"total"`
 	CoveredMinutes int             `json:"covered"`
 	Breakdown      []BreakdownItem `json:"breakdown"`
 }

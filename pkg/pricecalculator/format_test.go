@@ -25,12 +25,12 @@ func TestFormatItems_MultipleItems_JoinsWithCommaSpace(t *testing.T) {
 }
 
 func TestFormatItems_WithPricingPeriods_UsesStringRepresentation(t *testing.T) {
-	items := []PricingPeriod{{DurationMinutes: 60, Price: 1000}, {DurationMinutes: 120, Price: 1800}}
+	items := []PricingPeriod{{DurationMinutes: 60, Price: Maj(1000)}, {DurationMinutes: 120, Price: Maj(1800)}}
 	assert.Equal(t, "60⏱ - 1000💰, 120⏱ - 1800💰", FormatItems(items))
 }
 
 func TestFormatItems_WithBreakdownItems_UsesStringRepresentation(t *testing.T) {
-	items := []BreakdownItem{{Quantity: 1, DurationMinutes: 60, UsedDuration: 60, Price: 1000, UsedPrice: 1000}}
+	items := []BreakdownItem{{Quantity: 1, DurationMinutes: 60, UsedDuration: 60, Price: Maj(1000), UsedPrice: Maj(1000)}}
 	assert.Equal(t, "1x[60⏱ - 1000💰]", FormatItems(items))
 }
 

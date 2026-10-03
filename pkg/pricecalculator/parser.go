@@ -9,7 +9,8 @@ import (
 const (
 	defaultRequestedDurationStepMinutes    = 5
 	defaultMinimumRequestedDurationMinutes = 5
-	defaultTotalPriceStep                  = 1
+	// 0 = do not round the total (backward compatible with omitted price_step).
+	defaultTotalPriceStep Money = 0
 )
 
 var (
@@ -395,7 +396,7 @@ func effectiveRequestedMinimumDurationMinutes(minimumMinutes int) int {
 	return minimumMinutes
 }
 
-func effectiveTotalPriceStep(step int64) int64 {
+func effectiveTotalPriceStep(step Money) Money {
 	if step == 0 {
 		return defaultTotalPriceStep
 	}
@@ -406,11 +407,13 @@ func normalizeDuration(minutes int, stepMinutes int) int {
 	return ((minutes + stepMinutes - 1) / stepMinutes) * stepMinutes
 }
 
-// roundUpPrice rounds price up to the nearest multiple of step.
-// If step is 1 the price is returned unchanged.
-func roundUpPrice(price, step int64) int64 {
-	if step <= 1 {
+// roundUpPrice rounds price up to the nearest multiple of step (minor units).
+// step <= 0 leaves the price unchanged.
+func roundUpPrice(price, step Money) Money {
+	if step <= 0 {
 		return price
 	}
-	return ((price + step - 1) / step) * step
+	p := int64(price)
+	s := int64(step)
+	return Money(((p + s - 1) / s) * s)
 }

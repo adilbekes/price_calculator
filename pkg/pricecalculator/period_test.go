@@ -9,7 +9,7 @@ import (
 )
 
 func TestResolveDurationPeriod_RequiresPositiveDuration(t *testing.T) {
-	_, err := resolveDurationPeriod(PricingPeriod{Price: 1000})
+	_, err := resolveDurationPeriod(PricingPeriod{Price: Maj(1000)})
 	require.Error(t, err)
 }
 
@@ -18,7 +18,7 @@ func TestResolveTimeRangePeriod_DerivesDurationFromEndTime(t *testing.T) {
 		Type:      PeriodTypeTimeRange,
 		StartTime: "09:00",
 		EndTime:   "18:00",
-		Price:     4000,
+		Price: Maj(4000),
 	})
 	require.NoError(t, err)
 	assert.Equal(t, 540, period.DurationMinutes)
@@ -30,7 +30,7 @@ func TestResolveTimeRangePeriod_RejectsDurationMismatch(t *testing.T) {
 		StartTime:       "09:00",
 		EndTime:         "18:00",
 		DurationMinutes: 60,
-		Price:           1000,
+		Price: Maj(1000),
 	})
 	require.Error(t, err)
 }
@@ -41,7 +41,7 @@ func TestResolveCalendarPeriod_MonthFromSeventh(t *testing.T) {
 		Type:             PeriodTypeCalendar,
 		CalendarUnit:     CalendarUnitMonth,
 		CalendarInterval: 1,
-		Price:            50000,
+		Price: Maj(50000),
 	}, start)
 	require.NoError(t, err)
 
@@ -62,12 +62,12 @@ func TestCalculate_CalendarPeriod_CoversRequestedMonth(t *testing.T) {
 				Type:             PeriodTypeCalendar,
 				CalendarUnit:     CalendarUnitMonth,
 				CalendarInterval: 1,
-				Price:            50000,
+				Price: Maj(50000),
 			},
 		},
 	})
 	require.NoError(t, err)
-	assert.Equal(t, int64(50000), r.TotalPrice)
+	assert.Equal(t, Maj(50000), r.TotalPrice)
 	assert.GreaterOrEqual(t, r.CoveredMinutes, 28*24*60)
 }
 
@@ -83,12 +83,12 @@ func TestCalculate_TimeRangePeriod_WithEndTime(t *testing.T) {
 				Type:      PeriodTypeTimeRange,
 				StartTime: "09:00",
 				EndTime:   "18:00",
-				Price:     4000,
+				Price: Maj(4000),
 			},
 		},
 	})
 	require.NoError(t, err)
-	assert.Equal(t, int64(4000), r.TotalPrice)
+	assert.Equal(t, Maj(4000), r.TotalPrice)
 	assert.Equal(t, 540, r.CoveredMinutes)
 }
 
@@ -109,7 +109,7 @@ func TestCalculate_TimeRangePeriod_MidWindowDoesNotHang(t *testing.T) {
 			StartTime:                       "2026-10-03 15:12:00",
 			RequestedDurationStepMinutes:    5,
 			RequestedMinimumDurationMinutes: 5,
-			TotalPriceStep:                  1,
+			TotalPriceStep:                  0,
 			PricingMode:                     PricingModeRoundUp,
 			Periods: []PricingPeriod{
 				{
@@ -117,7 +117,7 @@ func TestCalculate_TimeRangePeriod_MidWindowDoesNotHang(t *testing.T) {
 					Type:      PeriodTypeTimeRange,
 					StartTime: "15:00",
 					EndTime:   "16:00",
-					Price:     1000,
+					Price: Maj(1000),
 				},
 			},
 		})
@@ -131,7 +131,7 @@ func TestCalculate_TimeRangePeriod_MidWindowDoesNotHang(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, 60, r.CoveredMinutes)
-	assert.GreaterOrEqual(t, r.TotalPrice, int64(1000))
+	assert.GreaterOrEqual(t, r.TotalPrice, Maj(1000))
 }
 
 func TestCalculate_DurationPeriod_Unchanged(t *testing.T) {
@@ -141,9 +141,9 @@ func TestCalculate_DurationPeriod_Unchanged(t *testing.T) {
 		StartTime:                "2026-04-01 12:00:00",
 		PricingMode:              PricingModeRoundUp,
 		Periods: []PricingPeriod{
-			{Id: "hour", Type: PeriodTypeDuration, DurationMinutes: 60, Price: 1000},
+			{Id: "hour", Type: PeriodTypeDuration, DurationMinutes: 60, Price: Maj(1000)},
 		},
 	})
 	require.NoError(t, err)
-	assert.Equal(t, int64(1000), r.TotalPrice)
+	assert.Equal(t, Maj(1000), r.TotalPrice)
 }

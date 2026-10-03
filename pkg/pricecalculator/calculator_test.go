@@ -14,20 +14,20 @@ func dt(year int, month time.Month, day, hour, min, sec int) string {
 	return time.Date(year, month, day, hour, min, sec, 0, time.Local).Format(time.DateTime)
 }
 
-func period(id string, duration int, price int64) PricingPeriod {
-	return PricingPeriod{Id: id, DurationMinutes: duration, Price: price}
+func period(id string, duration int, priceMajor int64) PricingPeriod {
+	return PricingPeriod{Id: id, DurationMinutes: duration, Price: Maj(priceMajor)}
 }
 
-func periodWithStart(id string, duration int, price int64, startTime string) PricingPeriod {
-	return PricingPeriod{Id: id, DurationMinutes: duration, Price: price, StartTime: startTime}
+func periodWithStart(id string, duration int, priceMajor int64, startTime string) PricingPeriod {
+	return PricingPeriod{Id: id, DurationMinutes: duration, Price: Maj(priceMajor), StartTime: startTime}
 }
 
-func periodWithAvail(id string, duration int, price int64, avail map[string]interface{}) PricingPeriod {
-	return PricingPeriod{Id: id, DurationMinutes: duration, Price: price, Availability: avail}
+func periodWithAvail(id string, duration int, priceMajor int64, avail map[string]interface{}) PricingPeriod {
+	return PricingPeriod{Id: id, DurationMinutes: duration, Price: Maj(priceMajor), Availability: avail}
 }
 
-func periodFull(id string, duration int, price int64, startTime string, avail map[string]interface{}) PricingPeriod {
-	return PricingPeriod{Id: id, DurationMinutes: duration, Price: price, StartTime: startTime, Availability: avail}
+func periodFull(id string, duration int, priceMajor int64, startTime string, avail map[string]interface{}) PricingPeriod {
+	return PricingPeriod{Id: id, DurationMinutes: duration, Price: Maj(priceMajor), StartTime: startTime, Availability: avail}
 }
 
 func req(duration int, start string, mode PricingMode, periods ...PricingPeriod) CalculateRequest {
@@ -122,7 +122,7 @@ func TestValidation_NegativeDurationStep(t *testing.T) {
 
 func TestValidation_NegativePriceStep(t *testing.T) {
 	r := req(60, "", PricingModeRoundUp, period("p1", 60, 1000))
-	r.TotalPriceStep = -1
+	r.TotalPriceStep = Money(-1)
 	_, err := calc().Calculate(r)
 	assert.ErrorIs(t, err, ErrInvalidRequest)
 }
@@ -146,7 +146,7 @@ func TestValidation_MissingAvailabilityDate_DefaultsToAvailable(t *testing.T) {
 		periodWithAvail("p1", 60, 1000, map[string]interface{}{"2026-04-01": true}),
 	))
 	require.NoError(t, err)
-	assert.Equal(t, int64(2000), r.TotalPrice)
+	assert.Equal(t, Maj(2000), r.TotalPrice)
 	assert.Equal(t, 120, r.CoveredMinutes)
 }
 
@@ -155,7 +155,7 @@ func TestValidation_MissingAvailabilityDate_DefaultsToAvailable(t *testing.T) {
 func TestRoundUp_ExactMatch(t *testing.T) {
 	r, err := calc().Calculate(req(60, "", PricingModeRoundUp, period("p1", 60, 1000)))
 	require.NoError(t, err)
-	assert.Equal(t, int64(1000), r.TotalPrice)
+	assert.Equal(t, Maj(1000), r.TotalPrice)
 	assert.Equal(t, 60, r.CoveredMinutes)
 	assert.Equal(t, "p1", r.Breakdown[0].Id)
 	assert.Equal(t, 1, r.Breakdown[0].Quantity)
@@ -167,7 +167,7 @@ func TestRoundUp_SelectsCheapestAmongSameDuration(t *testing.T) {
 		period("cheap", 60, 900),
 	))
 	require.NoError(t, err)
-	assert.Equal(t, int64(900), r.TotalPrice)
+	assert.Equal(t, Maj(900), r.TotalPrice)
 	assert.Equal(t, "cheap", r.Breakdown[0].Id)
 }
 
@@ -178,7 +178,7 @@ func TestRoundUp_DurationRoundedToStep(t *testing.T) {
 		period("p2", 120, 1800),
 	))
 	require.NoError(t, err)
-	assert.Equal(t, int64(1800), r.TotalPrice)
+	assert.Equal(t, Maj(1800), r.TotalPrice)
 	assert.Equal(t, 120, r.CoveredMinutes)
 }
 
@@ -189,7 +189,7 @@ func TestRoundUp_CustomDurationStep(t *testing.T) {
 	require.NoError(t, err)
 	// 37 → 40 (next multiple of 10), covered by 4 × 10-min
 	assert.Equal(t, 40, r.CoveredMinutes)
-	assert.Equal(t, int64(400), r.TotalPrice)
+	assert.Equal(t, Maj(400), r.TotalPrice)
 }
 
 func TestRoundUp_CombinesPeriodsOptimally(t *testing.T) {
@@ -200,7 +200,7 @@ func TestRoundUp_CombinesPeriodsOptimally(t *testing.T) {
 		period("p3", 180, 2500),
 	))
 	require.NoError(t, err)
-	assert.Equal(t, int64(4300), r.TotalPrice)
+	assert.Equal(t, Maj(4300), r.TotalPrice)
 	assert.Equal(t, 300, r.CoveredMinutes)
 }
 
@@ -212,7 +212,7 @@ func TestRoundUp_OverCoverageWhenNecessary(t *testing.T) {
 		period("p3", 180, 2500),
 	))
 	require.NoError(t, err)
-	assert.Equal(t, int64(5000), r.TotalPrice)
+	assert.Equal(t, Maj(5000), r.TotalPrice)
 	assert.Equal(t, 360, r.CoveredMinutes)
 }
 
@@ -223,16 +223,33 @@ func TestRoundUp_BelowMinimumRoundsUpToCheapestMinimumPeriod(t *testing.T) {
 		period("p2", 120, 1800),
 	))
 	require.NoError(t, err)
-	assert.Equal(t, int64(1000), r.TotalPrice)
+	assert.Equal(t, Maj(1000), r.TotalPrice)
 	assert.Equal(t, 60, r.CoveredMinutes)
 }
 
 func TestRoundUp_PriceStep_RoundsUp(t *testing.T) {
 	r2 := req(60, "", PricingModeRoundUp, period("p1", 60, 1003))
-	r2.TotalPriceStep = 10
+	r2.TotalPriceStep = Maj(10)
 	r, err := calc().Calculate(r2)
 	require.NoError(t, err)
-	assert.Equal(t, int64(1003), r.TotalPrice)
+	assert.Equal(t, Maj(1010), r.TotalPrice)
+}
+
+func TestRoundUp_FractionalPriceStep_RoundsUp(t *testing.T) {
+	r2 := req(60, "", PricingModeRoundUp, period("p1", 60, 1000))
+	// Force a non-aligned total via a fractional catalog price.
+	r2.Periods[0].Price = Majf(1000.15)
+	r2.TotalPriceStep = Majf(0.1)
+	r, err := calc().Calculate(r2)
+	require.NoError(t, err)
+	assert.Equal(t, Majf(1000.2), r.TotalPrice)
+}
+
+func TestValidation_PriceStepBelowMinimum(t *testing.T) {
+	r := req(60, "", PricingModeRoundUp, period("p1", 60, 1000))
+	r.TotalPriceStep = Majf(0.05)
+	_, err := calc().Calculate(r)
+	assert.ErrorIs(t, err, ErrInvalidRequest)
 }
 
 func TestRoundUp_TimeWindowedCatalog_DoesNotPreferSingleHugePeriodFastPath(t *testing.T) {
@@ -242,7 +259,7 @@ func TestRoundUp_TimeWindowedCatalog_DoesNotPreferSingleHugePeriodFastPath(t *te
 		period("huge", 1314000, 55000),
 	))
 	require.NoError(t, err)
-	assert.Less(t, r.TotalPrice, int64(55000))
+	assert.Less(t, r.TotalPrice, Maj(55000))
 	for _, item := range r.Breakdown {
 		assert.NotEqual(t, "huge", item.Id)
 	}
@@ -256,17 +273,17 @@ func TestProrateMinimum_BelowMinimumProrated(t *testing.T) {
 		period("p2", 120, 1800),
 	))
 	require.NoError(t, err)
-	assert.Equal(t, int64(500), r.TotalPrice)
+	assert.Equal(t, Maj(500), r.TotalPrice)
 	assert.Equal(t, 30, r.CoveredMinutes)
 }
 
 func TestProrateMinimum_FractionalPriceCeilingApplied(t *testing.T) {
-	// 20 min prorated from 60-min period at 1000: ceil(20/60 * 1000) = ceil(333.3) = 334
+	// 20 min prorated from 60-min period at 1000: ceil(20/60 * 100000 minor) = 33334 → 333.34
 	r, err := calc().Calculate(req(20, "", PricingModeProrateMinimum,
 		period("p1", 60, 1000),
 	))
 	require.NoError(t, err)
-	assert.Equal(t, int64(334), r.TotalPrice)
+	assert.Equal(t, Money(33334), r.TotalPrice)
 	assert.Equal(t, 20, r.CoveredMinutes)
 }
 
@@ -278,7 +295,7 @@ func TestProrateMinimum_AboveMinimumUsesFullPeriods(t *testing.T) {
 	))
 	require.NoError(t, err)
 	assert.Equal(t, 180, r.CoveredMinutes)
-	assert.Equal(t, int64(2800), r.TotalPrice)
+	assert.Equal(t, Maj(2800), r.TotalPrice)
 }
 
 // ─── ProrateAny mode ──────────────────────────────────────────────────────────
@@ -290,20 +307,19 @@ func TestProrateAny_ExactCoverage(t *testing.T) {
 		period("p2", 120, 1800),
 	))
 	require.NoError(t, err)
-	assert.Equal(t, int64(1500), r.TotalPrice)
+	assert.Equal(t, Maj(1500), r.TotalPrice)
 	assert.Equal(t, 90, r.CoveredMinutes)
 }
 
 func TestProrateAny_PrefersLowerTotalEvenIfOverCoverage(t *testing.T) {
-	// 100 min: full coverage = 60+60=2000 or 120=1800.
-	// Prorated: 60 + 40 prorated from 120 = 1000+ceil(40/120*1800)=1000+600=1600
-	// Cheapest is 120 full = 1800? No: prorated 1600 < 1800 < 2000
+	// 100 min: full coverage = 2×60=2000 or 120=1800.
+	// Prorated via 60 + 40/60 of 60-min period: 1000 + ceil(40/60*100000)/100 = 1666.67
 	r, err := calc().Calculate(req(100, "", PricingModeProrateAny,
 		period("p1", 60, 1000),
 		period("p2", 120, 1800),
 	))
 	require.NoError(t, err)
-	assert.Equal(t, int64(1667), r.TotalPrice)
+	assert.Equal(t, Money(166667), r.TotalPrice)
 	assert.LessOrEqual(t, r.CoveredMinutes, 120)
 }
 
@@ -312,7 +328,7 @@ func TestProrateAny_BelowMinimumProratesMinimumPeriod(t *testing.T) {
 		period("p1", 60, 1000),
 	))
 	require.NoError(t, err)
-	assert.Equal(t, int64(500), r.TotalPrice)
+	assert.Equal(t, Maj(500), r.TotalPrice)
 	assert.Equal(t, 30, r.CoveredMinutes)
 }
 
@@ -324,7 +340,7 @@ func TestHybridMode_BelowMinimumRoundsUp(t *testing.T) {
 		period("p2", 120, 1800),
 	))
 	require.NoError(t, err)
-	assert.Equal(t, int64(1000), r.TotalPrice)
+	assert.Equal(t, Maj(1000), r.TotalPrice)
 	assert.Equal(t, 60, r.CoveredMinutes)
 }
 
@@ -337,7 +353,7 @@ func TestHybridMode_AboveMinimumMayProrate(t *testing.T) {
 		period("p3", 180, 2500),
 	))
 	require.NoError(t, err)
-	assert.Equal(t, int64(2300), r.TotalPrice)
+	assert.Equal(t, Maj(2300), r.TotalPrice)
 	assert.Equal(t, 150, r.CoveredMinutes)
 }
 
@@ -380,7 +396,7 @@ func TestPeriodWindow_NotAvailableBeforeStartTime(t *testing.T) {
 		periodWithStart("p1", 60, 1000, "09:00"),
 	))
 	require.NoError(t, err)
-	assert.Equal(t, int64(1000), r.TotalPrice)
+	assert.Equal(t, Maj(1000), r.TotalPrice)
 }
 
 func TestPeriodWindow_AvailableAtStartTime(t *testing.T) {
@@ -388,7 +404,7 @@ func TestPeriodWindow_AvailableAtStartTime(t *testing.T) {
 		periodWithStart("p1", 60, 1000, "09:00"),
 	))
 	require.NoError(t, err)
-	assert.Equal(t, int64(1000), r.TotalPrice)
+	assert.Equal(t, Maj(1000), r.TotalPrice)
 }
 
 func TestPeriodWindow_CappedAtWindowEnd_FillsRemainingWithOtherPeriod(t *testing.T) {
@@ -401,7 +417,7 @@ func TestPeriodWindow_CappedAtWindowEnd_FillsRemainingWithOtherPeriod(t *testing
 		periodFull("2", 540, 4000, "09:00", map[string]interface{}{"2026-04-01": true}),
 	))
 	require.NoError(t, err)
-	assert.Equal(t, int64(5000), r.TotalPrice)
+	assert.Equal(t, Maj(5000), r.TotalPrice)
 	assert.Equal(t, 540, r.CoveredMinutes)
 
 	ids := make(map[string]bool)
@@ -451,7 +467,7 @@ func TestAvailability_AllUnavailable_FallbackToCatalog(t *testing.T) {
 		periodWithAvail("p1", 60, 1000, map[string]interface{}{"2026-03-31": false}),
 	))
 	require.NoError(t, err)
-	assert.Equal(t, int64(1000), r.TotalPrice)
+	assert.Equal(t, Maj(1000), r.TotalPrice)
 }
 
 func TestAvailability_DPOptimiserUsed_WhenOnlyBooleanRestrictions(t *testing.T) {
@@ -463,7 +479,7 @@ func TestAvailability_DPOptimiserUsed_WhenOnlyBooleanRestrictions(t *testing.T) 
 		periodWithAvail("p3", 180, 2500, map[string]interface{}{"2026-03-31": true}),
 	))
 	require.NoError(t, err)
-	assert.Equal(t, int64(8600), r.TotalPrice)
+	assert.Equal(t, Maj(8600), r.TotalPrice)
 	assert.Equal(t, 600, r.CoveredMinutes)
 }
 
@@ -477,7 +493,7 @@ func TestTimeRange_PeriodSwitchesAtBoundary(t *testing.T) {
 		periodWithAvail("2", 60, 800, map[string]interface{}{"2026-04-01": "12:00-23:59"}),
 	))
 	require.NoError(t, err)
-	assert.Equal(t, int64(6000), r.TotalPrice)
+	assert.Equal(t, Maj(6000), r.TotalPrice)
 	assert.Equal(t, 400, r.CoveredMinutes)
 
 	ids := map[string]bool{}
@@ -493,7 +509,7 @@ func TestTimeRange_OutsideWindow_Unavailable(t *testing.T) {
 		periodWithAvail("p1", 60, 1000, map[string]interface{}{"2026-04-01": "10:00-18:00"}),
 	))
 	require.NoError(t, err)
-	assert.Equal(t, int64(1000), r.TotalPrice)
+	assert.Equal(t, Maj(1000), r.TotalPrice)
 }
 
 func TestTimeRange_FallbackPrefersStartAvailablePeriods(t *testing.T) {
@@ -506,7 +522,7 @@ func TestTimeRange_FallbackPrefersStartAvailablePeriods(t *testing.T) {
 		periodWithAvail("2", 60, 800, map[string]interface{}{"2026-03-31": "21:00-23:59"}),
 	))
 	require.NoError(t, err)
-	assert.Equal(t, int64(1800), r.TotalPrice)
+	assert.Equal(t, Maj(1800), r.TotalPrice)
 	assert.Equal(t, 120, r.CoveredMinutes)
 }
 
@@ -517,7 +533,7 @@ func TestAvailability_TimeRangeArray_MultipleNonOverlappingWindows(t *testing.T)
 		}),
 	))
 	require.NoError(t, err)
-	assert.Equal(t, int64(2000), r.TotalPrice)
+	assert.Equal(t, Maj(2000), r.TotalPrice)
 	assert.Equal(t, 120, r.CoveredMinutes)
 }
 
@@ -528,7 +544,7 @@ func TestAvailability_TimeRangeArray_WithinFirstWindow(t *testing.T) {
 		}),
 	))
 	require.NoError(t, err)
-	assert.Equal(t, int64(1000), r.TotalPrice)
+	assert.Equal(t, Maj(1000), r.TotalPrice)
 }
 
 func TestAvailability_TimeRangeArray_WithinSecondWindow(t *testing.T) {
@@ -538,7 +554,7 @@ func TestAvailability_TimeRangeArray_WithinSecondWindow(t *testing.T) {
 		}),
 	))
 	require.NoError(t, err)
-	assert.Equal(t, int64(1000), r.TotalPrice)
+	assert.Equal(t, Maj(1000), r.TotalPrice)
 }
 
 func TestAvailability_TimeRangeArray_BetweenWindows_Unavailable(t *testing.T) {
@@ -548,7 +564,7 @@ func TestAvailability_TimeRangeArray_BetweenWindows_Unavailable(t *testing.T) {
 		}),
 	))
 	require.NoError(t, err)
-	assert.Equal(t, int64(1000), r.TotalPrice)
+	assert.Equal(t, Maj(1000), r.TotalPrice)
 }
 
 func TestAvailability_TimeRangeArray_OverlappingRanges_AllowedSilently(t *testing.T) {
@@ -558,7 +574,7 @@ func TestAvailability_TimeRangeArray_OverlappingRanges_AllowedSilently(t *testin
 		}),
 	))
 	require.NoError(t, err)
-	assert.Equal(t, int64(2000), r.TotalPrice)
+	assert.Equal(t, Maj(2000), r.TotalPrice)
 }
 
 func TestAvailability_TimeRangeArray_WithPeriodStartTime(t *testing.T) {
@@ -568,7 +584,7 @@ func TestAvailability_TimeRangeArray_WithPeriodStartTime(t *testing.T) {
 		}),
 	))
 	require.NoError(t, err)
-	assert.Equal(t, int64(2000), r.TotalPrice)
+	assert.Equal(t, Maj(2000), r.TotalPrice)
 }
 
 func TestRoundUp_WithHugeUnrestrictedPeriod_ChoosesCheaperTimelineCombination(t *testing.T) {
@@ -601,7 +617,7 @@ func TestRoundUp_WithHugeUnrestrictedPeriod_ChoosesCheaperTimelineCombination(t 
 	))
 	require.NoError(t, err)
 	assert.Equal(t, 7000, r.CoveredMinutes)
-	assert.Equal(t, int64(38700), r.TotalPrice)
+	assert.Equal(t, Maj(38700), r.TotalPrice)
 }
 
 // ─── nowTime stubbing (omitted start_time) ────────────────────────────────────
@@ -620,7 +636,7 @@ func TestNowTime_UsedWhenStartTimeOmitted(t *testing.T) {
 	))
 	require.NoError(t, err)
 	assert.Equal(t, 2040, r.CoveredMinutes)
-	assert.Equal(t, int64(28500), r.TotalPrice)
+	assert.Equal(t, Maj(28500), r.TotalPrice)
 }
 
 // ─── breakdown correctness ────────────────────────────────────────────────────
@@ -746,12 +762,12 @@ func TestValidation_AvailabilityTimeRange_InvalidEndHour_ReturnsError(t *testing
 func TestValidation_ZeroPricePeriod_IsAllowed(t *testing.T) {
 	r, err := calc().Calculate(req(60, "", PricingModeRoundUp, period("p1", 60, 0)))
 	require.NoError(t, err)
-	assert.Equal(t, int64(0), r.TotalPrice)
+	assert.Equal(t, Maj(0), r.TotalPrice)
 }
 
 func TestValidation_PeriodDurationZero_ReturnsPeriodsError(t *testing.T) {
 	_, err := calc().Calculate(req(60, "", PricingModeRoundUp,
-		PricingPeriod{Id: "p1", DurationMinutes: 0, Price: 1000},
+		PricingPeriod{Id: "p1", DurationMinutes: 0, Price: Maj(1000)},
 	))
 	assert.ErrorIs(t, err, ErrInvalidPeriods)
 }
