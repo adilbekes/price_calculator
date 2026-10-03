@@ -88,18 +88,20 @@ func requestInterval(startTime time.Time, durationMinutes int) (time.Time, time.
 	return startTime, end
 }
 
+// isAfterOrAtPeriodStartTime reports whether checkTime falls inside the
+// period's daily clock window. With only start_time the window is
+// [start, start+duration); with end_time it is [start, end).
 func isAfterOrAtPeriodStartTime(period PricingPeriod, checkTime time.Time) (bool, error) {
 	if period.StartTime == "" {
 		return true, nil
 	}
 
-	hour, minute, err := parseTimeHHMM(period.StartTime)
-	if err != nil {
-		return false, NewRequestError("period '%s': %s", period.Identifier(), err.Error())
+	windowStart, windowEnd, ok := periodWindowBoundsForReferenceDay(period, checkTime)
+	if !ok {
+		return false, NewRequestError("period '%s': invalid start_time/end_time window", period.Identifier())
 	}
 
-	start := time.Date(checkTime.Year(), checkTime.Month(), checkTime.Day(), hour, minute, 0, 0, timeLocation(checkTime))
-	return checkTime.Equal(start) || checkTime.After(start), nil
+	return (checkTime.Equal(windowStart) || checkTime.After(windowStart)) && checkTime.Before(windowEnd), nil
 }
 
 func touchedDates(start time.Time, end time.Time) []time.Time {

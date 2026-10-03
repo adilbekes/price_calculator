@@ -92,6 +92,48 @@ func TestCalculate_TimeRangePeriod_WithEndTime(t *testing.T) {
 	assert.Equal(t, 540, r.CoveredMinutes)
 }
 
+func TestCalculate_TimeRangePeriod_MidWindowDoesNotHang(t *testing.T) {
+	// Request starts mid-window and needs minutes past end_time — previously
+	// the timeline optimizer spun forever with usedMinutes=0 after 16:00.
+	done := make(chan struct{})
+	var (
+		r   CalculateResult
+		err error
+	)
+
+	go func() {
+		defer close(done)
+		c := NewCalculator()
+		r, err = c.Calculate(CalculateRequest{
+			RequestedDurationMinutes:        60,
+			StartTime:                       "2026-10-03 15:12:00",
+			RequestedDurationStepMinutes:    5,
+			RequestedMinimumDurationMinutes: 5,
+			TotalPriceStep:                  1,
+			PricingMode:                     PricingModeRoundUp,
+			Periods: []PricingPeriod{
+				{
+					Id:        "1",
+					Type:      PeriodTypeTimeRange,
+					StartTime: "15:00",
+					EndTime:   "16:00",
+					Price:     1000,
+				},
+			},
+		})
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeline optimizer hung on mid-window time_range request")
+	}
+
+	require.NoError(t, err)
+	assert.Equal(t, 60, r.CoveredMinutes)
+	assert.GreaterOrEqual(t, r.TotalPrice, int64(1000))
+}
+
 func TestCalculate_DurationPeriod_Unchanged(t *testing.T) {
 	c := NewCalculator()
 	r, err := c.Calculate(CalculateRequest{

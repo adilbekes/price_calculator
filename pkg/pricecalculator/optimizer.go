@@ -296,20 +296,16 @@ func optimizeTimelineAware(
 			}
 		}
 
-		if bestPeriod == -1 {
-			// No period available — fallback to the cheapest by absolute price
-			for i, period := range periods {
-				if bestPeriod == -1 || period.Price < periods[bestPeriod].Price {
-					bestPeriod = i
-				}
+		if bestPeriod == -1 || bestEffective <= 0 {
+			// Closed window / not yet open: jump to the next usable open instead
+			// of spinning forever with usedMinutes=0 (the old absolute-price
+			// fallback did that after end_time).
+			nextOpen, ok := nextUsableTimelineTime(periods, currentTime)
+			if !ok {
+				return CalculateResult{}, NewRequestError("no pricing solution found")
 			}
-			if bestPeriod == -1 {
-				break
-			}
-			bestEffective = periodWindowRemainingMinutes(periods[bestPeriod], currentTime)
-			if bestEffective > remainingMinutes {
-				bestEffective = remainingMinutes
-			}
+			currentTime = nextOpen
+			continue
 		}
 
 		// Use the best available period
@@ -337,7 +333,10 @@ func optimizeTimelineAware(
 		if allowProrating {
 			// Check if a cheaper period becomes available within the next period duration
 			// If so, calculate how much time until it becomes available and use the current period only for that
-			timeUntilNextChange := period.DurationMinutes
+			timeUntilNextChange := usedMinutes
+			if timeUntilNextChange > period.DurationMinutes {
+				timeUntilNextChange = period.DurationMinutes
+			}
 			for i, otherPeriod := range periods {
 				if i == bestPeriod || otherPeriod.Price >= period.Price {
 					continue // Skip current period and more expensive ones
@@ -365,6 +364,15 @@ func optimizeTimelineAware(
 			if usedMinutes < period.DurationMinutes {
 				price = calculateProratedPrice(period, usedMinutes)
 			}
+		}
+
+		if usedMinutes <= 0 {
+			nextOpen, ok := nextUsableTimelineTime(periods, currentTime)
+			if !ok {
+				return CalculateResult{}, NewRequestError("no pricing solution found")
+			}
+			currentTime = nextOpen
+			continue
 		}
 
 		// In non-prorating modes, breakdown reflects charged full period values.
@@ -676,4 +684,100 @@ func periodWindowRemainingMinutes(period PricingPeriod, currentTime time.Time) i
 		return period.DurationMinutes
 	}
 	return remaining
+}
+
+// nextUsableTimelineTime returns the earliest time strictly after `after` when
+// any period can cover at least one minute, looking up to one year ahead.
+func nextUsableTimelineTime(periods []PricingPeriod, after time.Time) (time.Time, bool) {
+	var earliest time.Time
+	found := false
+	loc := timeLocation(after)
+
+	consider := func(candidate time.Time) {
+		if !candidate.After(after) {
+			return
+		}
+		for _, period := range periods {
+			available, err := isPeriodAvailableAtTime(period, candidate)
+			if err != nil || !available {
+				continue
+			}
+			if periodWindowRemainingMinutes(period, candidate) <= 0 {
+				continue
+			}
+			if !found || candidate.Before(earliest) {
+				earliest = candidate
+				found = true
+			}
+			return
+		}
+	}
+
+	for dayOffset := 0; dayOffset <= 366; dayOffset++ {
+		day := time.Date(after.Year(), after.Month(), after.Day(), 0, 0, 0, 0, loc).AddDate(0, 0, dayOffset)
+
+		for _, period := range periods {
+			if period.StartTime != "" {
+				windowStart, windowEnd, ok := periodWindowBoundsForReferenceDay(period, day)
+				if ok && windowEnd.After(windowStart) {
+					consider(windowStart)
+				}
+			}
+
+			dateStr := day.Format(time.DateOnly)
+			availability, exists := period.Availability[dateStr]
+			if !exists {
+				if period.StartTime == "" {
+					if dayOffset == 0 {
+						consider(after.Add(time.Minute))
+					} else {
+						consider(day)
+					}
+				}
+				continue
+			}
+
+			for _, open := range availabilityOpenTimes(day, availability) {
+				consider(open)
+			}
+		}
+
+		if found {
+			return earliest, true
+		}
+	}
+
+	return time.Time{}, false
+}
+
+func availabilityOpenTimes(day time.Time, availability interface{}) []time.Time {
+	switch value := availability.(type) {
+	case bool:
+		if !value {
+			return nil
+		}
+		return []time.Time{time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, timeLocation(day))}
+	case string:
+		start, end, err := parseTimeRangeForDate(day, value)
+		if err != nil || !end.After(start) {
+			return nil
+		}
+		return []time.Time{start}
+	case []interface{}:
+		opens := make([]time.Time, 0, len(value))
+		for _, entry := range value {
+			rangeStr, ok := entry.(string)
+			if !ok {
+				continue
+			}
+			start, end, err := parseTimeRangeForDate(day, rangeStr)
+			if err != nil || !end.After(start) {
+				continue
+			}
+			opens = append(opens, start)
+		}
+		return opens
+	default:
+		return nil
+	}
 }

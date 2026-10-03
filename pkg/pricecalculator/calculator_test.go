@@ -413,15 +413,15 @@ func TestPeriodWindow_CappedAtWindowEnd_FillsRemainingWithOtherPeriod(t *testing
 }
 
 func TestPeriodWindow_BreakdownContainsStartAndEndTime(t *testing.T) {
-	t.Skip("known timeline optimizer hang for a single start_time period; tracked separately")
-
+	// Window is 09:00-10:00; request at 10:00 is at the closed edge, so the
+	// timeline jumps to the next day's open and charges there.
 	r, err := calc().Calculate(req(60, dt(2026, 4, 1, 10, 0, 0), PricingModeRoundUp,
 		periodWithStart("p1", 60, 1000, "09:00"),
 	))
 	require.NoError(t, err)
 	require.Len(t, r.Breakdown, 1)
-	assert.Equal(t, dt(2026, 4, 1, 10, 0, 0), r.Breakdown[0].StartTime)
-	assert.Equal(t, dt(2026, 4, 1, 11, 0, 0), r.Breakdown[0].EndTime)
+	assert.Equal(t, dt(2026, 4, 2, 9, 0, 0), r.Breakdown[0].StartTime)
+	assert.Equal(t, dt(2026, 4, 2, 10, 0, 0), r.Breakdown[0].EndTime)
 }
 
 func TestPeriodWindow_NoDurationPeriod_NoTimeInBreakdown(t *testing.T) {
@@ -562,8 +562,6 @@ func TestAvailability_TimeRangeArray_OverlappingRanges_AllowedSilently(t *testin
 }
 
 func TestAvailability_TimeRangeArray_WithPeriodStartTime(t *testing.T) {
-	t.Skip("known timeline optimizer hang with period start_time and time range arrays")
-
 	r, err := calc().Calculate(req(120, dt(2026, 4, 1, 10, 0, 0), PricingModeRoundUp,
 		periodFull("p1", 60, 1000, "09:00", map[string]interface{}{
 			"2026-04-01": []interface{}{"09:00-12:00", "14:00-18:00"},
