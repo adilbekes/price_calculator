@@ -70,7 +70,7 @@ echo '{"duration":150,"mode":"RoundUp","periods":[{"duration":60,"price":1000}]}
 |---|---|---|---|---|
 | `duration` | int | ✅ | — | **Required:** Requested rental duration in minutes |
 | `start_time` | string | ❌ | Current local datetime | Optional: datetime string in `YYYY-MM-DD HH:MM:SS` format; if not provided, current time is used |
-| `periods` | array | ✅ | — | List of `{id, duration, price}` catalog periods |
+| `periods` | array | ✅ | — | List of catalog periods (see Period Fields; types match Rentos `RentalPeriodType`) |
 | `mode` | string | ✅ | — | See [Pricing modes](#pricing-modes) |
 | `duration_step` | int | ❌ | `5` | Duration is rounded up to this step before pricing |
 | `min_duration` | int | ❌ | `5` | Requests below this are rejected with an error |
@@ -78,20 +78,29 @@ echo '{"duration":150,"mode":"RoundUp","periods":[{"duration":60,"price":1000}]}
 
 ### Period Fields
 
-Each object in `periods` supports these fields:
+Each object in `periods` supports these fields. `type` aligns with Rentos `RentalPeriodType` (`duration` | `time_range` | `calendar`). Empty `type` defaults to `duration` (backward compatible).
 
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `id` | string | ❌ | Optional unique identifier (if any period has `id`, all periods must have unique `id`) |
-| `duration` | int | ✅ | Catalog duration in minutes |
+| `type` | string | ❌ | `duration` (default), `time_range`, or `calendar` |
+| `duration` | int | conditional | Minutes. Required for `duration`. For `time_range`: required unless `end_time` is set (then duration may be derived). Forbidden for `calendar` (resolved from calendar fields + request `start_time`). |
 | `price` | int64 | ✅ | Catalog price |
-| `start_time` | string | ❌ | Period start-of-day time in `HH:MM` format (for example, `"09:00"`) |
+| `start_time` | string | conditional | Time-of-day `HH:MM`. Required for `time_range`. Optional daily window for `calendar` (must pair with `end_time`). Optional legacy daily window for `duration`. |
+| `end_time` | string | conditional | Time-of-day `HH:MM`. For `time_range`: optional; with `start_time` derives same-day leftover minutes. For `calendar`: required iff `start_time` is set. |
+| `calendar_unit` | string | conditional | Required for `calendar`: `day`, `week`, `month`, or `year` |
+| `calendar_interval` | int | conditional | Required for `calendar`: ≥ 1 (e.g. `1` + `month` = one calendar month from request start) |
 | `availability` | object | ❌ | Per-date availability map (see below) |
 
-`period.start_time` semantics:
+**Type rules (resolved before optimization):**
+- **`duration`** — fixed length in minutes from whenever the rental starts. No `end_time` / calendar fields.
+- **`time_range`** — fixed clock window (`start_time` required). Duration = full days + same-day leftover from `end_time - start_time`, or an explicit `duration` that agrees with that leftover.
+- **`calendar`** — length in minutes is derived at request time: `request.start_time` + `calendar_interval` × `calendar_unit` (calendar arithmetic, so a month from the 7th ends on the 7th of the next month). Optional `start_time`+`end_time` restrict the daily pickup window.
+
+`period.start_time` semantics (when set):
 - It is a time-of-day anchor for that period, not a full datetime.
 - A period with `start_time` is unavailable before that time on a given day.
-- The period defines a daily window from `start_time` to `start_time + duration`.
+- With `end_time`, the daily window is `start_time`→`end_time`; otherwise `start_time`→`start_time + duration`.
 - Requests can be split across periods when a window ends (for example, one period until 18:00, another after 18:00).
 
 ### Period Availability
@@ -170,6 +179,42 @@ Each period in the `periods` array can optionally include an `availability` obje
 ```
 
 In this example, `day_window` can only be used inside `09:00-18:00` on that day. A request continuing past 18:00 is completed by other available periods.
+
+#### Example: `time_range` period
+```json
+{
+  "duration": 540,
+  "start_time": "2026-04-01 09:00:00",
+  "mode": "RoundUp",
+  "periods": [
+    {
+      "id": "day",
+      "type": "time_range",
+      "start_time": "09:00",
+      "end_time": "18:00",
+      "price": 4000
+    }
+  ]
+}
+```
+
+#### Example: `calendar` period (1 month from the 7th)
+```json
+{
+  "duration": 43200,
+  "start_time": "2026-04-07 10:00:00",
+  "mode": "RoundUp",
+  "periods": [
+    {
+      "id": "month",
+      "type": "calendar",
+      "calendar_unit": "month",
+      "calendar_interval": 1,
+      "price": 50000
+    }
+  ]
+}
+```
 
 
 ### Output

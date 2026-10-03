@@ -618,6 +618,16 @@ func periodWindowBoundsForReferenceDay(period PricingPeriod, reference time.Time
 
 	loc := timeLocation(reference)
 	windowStart := time.Date(reference.Year(), reference.Month(), reference.Day(), hour, minute, 0, 0, loc)
+
+	if period.EndTime != "" {
+		endHour, endMin, err := parseTimeHHMM(period.EndTime)
+		if err != nil {
+			return time.Time{}, time.Time{}, false
+		}
+		windowEnd := time.Date(reference.Year(), reference.Month(), reference.Day(), endHour, endMin, 0, 0, loc)
+		return windowStart, windowEnd, true
+	}
+
 	windowEnd := windowStart.Add(time.Duration(period.DurationMinutes) * time.Minute)
 
 	return windowStart, windowEnd, true
@@ -645,15 +655,25 @@ func periodWindowRemainingMinutes(period PricingPeriod, currentTime time.Time) i
 	if period.StartTime == "" {
 		return period.DurationMinutes
 	}
-	hour, minute, err := parseTimeHHMM(period.StartTime)
-	if err != nil {
+
+	windowStart, windowEnd, ok := periodWindowBoundsForReferenceDay(period, currentTime)
+	if !ok {
 		return period.DurationMinutes
 	}
-	loc := timeLocation(currentTime)
-	windowStart := time.Date(currentTime.Year(), currentTime.Month(), currentTime.Day(), hour, minute, 0, 0, loc)
-	windowEnd := windowStart.Add(time.Duration(period.DurationMinutes) * time.Minute)
+	if currentTime.Before(windowStart) {
+		// Not yet open today — remaining is the full daily window length.
+		remaining := int(windowEnd.Sub(windowStart).Minutes())
+		if remaining > period.DurationMinutes {
+			return period.DurationMinutes
+		}
+		return remaining
+	}
 	if !windowEnd.After(currentTime) {
 		return 0
 	}
-	return int(windowEnd.Sub(currentTime).Minutes())
+	remaining := int(windowEnd.Sub(currentTime).Minutes())
+	if remaining > period.DurationMinutes {
+		return period.DurationMinutes
+	}
+	return remaining
 }

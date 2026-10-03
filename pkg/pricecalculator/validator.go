@@ -100,10 +100,39 @@ func validatePeriods(periods []PricingPeriod) error {
 	}
 
 	for i, period := range periods {
-		// Validate that period has either time-based (startTime+endTime) or duration-based specification
-		effectiveDuration, err := getEffectiveDurationMinutes(period)
-		if err != nil {
-			return NewPeriodsError("period[%d]: %s", i, err.Error())
+		// Shape-only validation here; calendar duration is resolved later with
+		// request start_time. Time-range/duration must already be resolvable
+		// without a request clock.
+		switch period.EffectiveType() {
+		case PeriodTypeDuration, PeriodTypeTimeRange:
+			if _, err := resolvePeriod(period, time.Time{}); err != nil {
+				return NewPeriodsError("period[%d]: %s", i, err.Error())
+			}
+		case PeriodTypeCalendar:
+			if period.DurationMinutes != 0 {
+				return NewPeriodsError("period[%d]: calendar periods cannot have duration", i)
+			}
+			if period.CalendarInterval < 1 {
+				return NewPeriodsError("period[%d]: calendar_interval must be at least 1", i)
+			}
+			switch period.CalendarUnit {
+			case CalendarUnitDay, CalendarUnitWeek, CalendarUnitMonth, CalendarUnitYear:
+			default:
+				return NewPeriodsError("period[%d]: calendar_unit must be day, week, month, or year", i)
+			}
+			if (period.StartTime == "") != (period.EndTime == "") {
+				return NewPeriodsError("period[%d]: calendar periods require both start_time and end_time, or neither", i)
+			}
+			if period.StartTime != "" {
+				if _, _, err := parseTimeHHMM(period.StartTime); err != nil {
+					return NewPeriodsError("period[%d]: %s", i, err.Error())
+				}
+				if _, _, err := parseTimeHHMM(period.EndTime); err != nil {
+					return NewPeriodsError("period[%d]: %s", i, err.Error())
+				}
+			}
+		default:
+			return NewPeriodsError("period[%d]: unknown type %q", i, period.Type)
 		}
 
 		if period.Price < 0 {
@@ -123,12 +152,11 @@ func validatePeriods(periods []PricingPeriod) error {
 			continue
 		}
 
-		key := period.StartTime + "|" + strconv.Itoa(effectiveDuration) + "|" + strconv.FormatInt(period.Price, 10)
+		key := string(period.EffectiveType()) + "|" + period.StartTime + "|" + period.EndTime + "|" +
+			string(period.CalendarUnit) + "|" + strconv.Itoa(period.CalendarInterval) + "|" +
+			strconv.Itoa(period.DurationMinutes) + "|" + strconv.FormatInt(period.Price, 10)
 		if _, exists := seenPeriods[key]; exists {
-			if period.StartTime != "" {
-				return NewPeriodsError("period[%d]: duplicate period (start_time=%s, duration=%d, price=%d)", i, period.StartTime, effectiveDuration, period.Price)
-			}
-			return NewPeriodsError("period[%d]: duplicate period (duration=%d, price=%d)", i, effectiveDuration, period.Price)
+			return NewPeriodsError("period[%d]: duplicate period", i)
 		}
 
 		seenPeriods[key] = struct{}{}

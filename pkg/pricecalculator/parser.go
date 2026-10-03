@@ -12,9 +12,11 @@ const (
 	defaultTotalPriceStep                  = 1
 )
 
-var nowTime = func() time.Time {
-	return time.Now()
-}
+var (
+	nowTime      = func() time.Time { return time.Now() }
+	hhmmRe       = regexp.MustCompile(`^(\d{2}):(\d{2})$`)
+	timeRangeRe  = regexp.MustCompile(`^(\d{2}):(\d{2})-(\d{2}):(\d{2})$`)
+)
 
 func timeLocation(t time.Time) *time.Location {
 	if loc := t.Location(); loc != nil {
@@ -25,8 +27,7 @@ func timeLocation(t time.Time) *time.Location {
 
 // parseTimeHHMM parses a HH:MM time string and returns the hour and minute
 func parseTimeHHMM(timeStr string) (int, int, error) {
-	re := regexp.MustCompile(`^(\d{2}):(\d{2})$`)
-	matches := re.FindStringSubmatch(timeStr)
+	matches := hhmmRe.FindStringSubmatch(timeStr)
 	if matches == nil {
 		return 0, 0, NewRequestError("invalid time format: %s (expected HH:MM, e.g., '09:00')", timeStr)
 	}
@@ -41,11 +42,16 @@ func parseTimeHHMM(timeStr string) (int, int, error) {
 	return hour, minute, nil
 }
 
-// getEffectiveDurationMinutes validates period duration settings.
-// Duration is always taken from DurationMinutes; StartTime is optional.
+// getEffectiveDurationMinutes validates a resolved period's duration settings.
+// Call resolvePeriod first for calendar / time_range derivation.
 func getEffectiveDurationMinutes(period PricingPeriod) (int, error) {
 	if period.StartTime != "" {
 		if _, _, err := parseTimeHHMM(period.StartTime); err != nil {
+			return 0, err
+		}
+	}
+	if period.EndTime != "" {
+		if _, _, err := parseTimeHHMM(period.EndTime); err != nil {
 			return 0, err
 		}
 	}
@@ -170,8 +176,7 @@ func availabilityWindowForDate(date time.Time, availability interface{}) (bool, 
 }
 
 func parseTimeRangeForDate(date time.Time, timeRangeStr string) (time.Time, time.Time, error) {
-	re := regexp.MustCompile(`^(\d{2}):(\d{2})-(\d{2}):(\d{2})$`)
-	matches := re.FindStringSubmatch(timeRangeStr)
+	matches := timeRangeRe.FindStringSubmatch(timeRangeStr)
 	if matches == nil {
 		return time.Time{}, time.Time{}, NewRequestError(
 			"invalid time range format: %s (expected HH:MM-HH:MM, e.g., '10:00-18:00')",
@@ -333,9 +338,7 @@ func isPeriodAvailableAtTime(period PricingPeriod, checkTime time.Time) (bool, e
 
 // isTimeWithinRange checks if a given time falls within a time range string like "10:00-18:00"
 func isTimeWithinRange(checkTime time.Time, timeRangeStr string) (bool, error) {
-	// Validate format with regex
-	re := regexp.MustCompile(`^(\d{2}):(\d{2})-(\d{2}):(\d{2})$`)
-	matches := re.FindStringSubmatch(timeRangeStr)
+	matches := timeRangeRe.FindStringSubmatch(timeRangeStr)
 	if matches == nil {
 		return false, NewRequestError("invalid time range format: %s (expected HH:MM-HH:MM, e.g., '10:00-18:00')", timeRangeStr)
 	}

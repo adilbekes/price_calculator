@@ -68,13 +68,41 @@ func (pm *PricingMode) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// PeriodType matches Rentos RentalPeriodType: how a catalog pricing period is timed.
+type PeriodType string
+
+const (
+	PeriodTypeDuration  PeriodType = "duration"
+	PeriodTypeTimeRange PeriodType = "time_range"
+	PeriodTypeCalendar  PeriodType = "calendar"
+)
+
+// CalendarUnit matches Rentos CalendarPeriodUnit.
+type CalendarUnit string
+
+const (
+	CalendarUnitDay   CalendarUnit = "day"
+	CalendarUnitWeek  CalendarUnit = "week"
+	CalendarUnitMonth CalendarUnit = "month"
+	CalendarUnitYear  CalendarUnit = "year"
+)
+
 type PricingPeriod struct {
-	Id              string `json:"id,omitempty"`
-	DurationMinutes int    `json:"duration"`
-	Price           int64  `json:"price"`
-	// Optional fixed start time for this period in HH:MM format.
-	// Duration is still taken from DurationMinutes.
+	Id   string     `json:"id,omitempty"`
+	Type PeriodType `json:"type,omitempty"` // duration | time_range | calendar; empty defaults to duration
+	// DurationMinutes is required for duration/time_range (or derived from
+	// start_time+end_time for same-day time_range). For calendar it is resolved
+	// at calculation time from calendar_unit/calendar_interval and must be omitted.
+	DurationMinutes int `json:"duration,omitempty"`
+	Price           int64 `json:"price"`
+	// Optional fixed clock start (HH:MM). Required for time_range.
 	StartTime string `json:"start_time,omitempty"`
+	// Optional fixed clock end (HH:MM). For time_range may derive duration;
+	// for calendar (with start_time) restricts the daily pickup window.
+	EndTime string `json:"end_time,omitempty"`
+	// Calendar fields — required when type=calendar.
+	CalendarUnit     CalendarUnit `json:"calendar_unit,omitempty"`
+	CalendarInterval int          `json:"calendar_interval,omitempty"`
 	// Availability map with dates (YYYY-MM-DD) as keys.
 	// Value can be:
 	// - true: available all day (00:00-23:59)
@@ -83,11 +111,38 @@ type PricingPeriod struct {
 	Availability map[string]interface{} `json:"availability,omitempty"`
 }
 
-func (pp PricingPeriod) String() string {
-	if pp.StartTime != "" {
-		return fmt.Sprintf("%s + %d⏱ - %d💰", pp.StartTime, pp.DurationMinutes, pp.Price)
+func (pp PricingPeriod) EffectiveType() PeriodType {
+	if pp.Type == "" {
+		return PeriodTypeDuration
 	}
-	return fmt.Sprintf("%d⏱ - %d💰", pp.DurationMinutes, pp.Price)
+	return pp.Type
+}
+
+func (pp PricingPeriod) String() string {
+	switch pp.EffectiveType() {
+	case PeriodTypeCalendar:
+		base := fmt.Sprintf("%d%s - %d💰", pp.CalendarInterval, pp.CalendarUnit, pp.Price)
+		if pp.StartTime != "" {
+			if pp.EndTime != "" {
+				return fmt.Sprintf("%s→%s %s", pp.StartTime, pp.EndTime, base)
+			}
+			return fmt.Sprintf("%s + %s", pp.StartTime, base)
+		}
+		return base
+	case PeriodTypeTimeRange:
+		if pp.EndTime != "" {
+			return fmt.Sprintf("%s→%s (%d⏱) - %d💰", pp.StartTime, pp.EndTime, pp.DurationMinutes, pp.Price)
+		}
+		if pp.StartTime != "" {
+			return fmt.Sprintf("%s + %d⏱ - %d💰", pp.StartTime, pp.DurationMinutes, pp.Price)
+		}
+		return fmt.Sprintf("%d⏱ - %d💰", pp.DurationMinutes, pp.Price)
+	default:
+		if pp.StartTime != "" {
+			return fmt.Sprintf("%s + %d⏱ - %d💰", pp.StartTime, pp.DurationMinutes, pp.Price)
+		}
+		return fmt.Sprintf("%d⏱ - %d💰", pp.DurationMinutes, pp.Price)
+	}
 }
 
 func (pp PricingPeriod) Identifier() string {
@@ -99,7 +154,7 @@ func (pp PricingPeriod) Identifier() string {
 }
 
 type CalculateRequest struct {
-	RequestedDurationMinutes        int             `json:"duration"`                  // Required: rental duration in minutes
+	RequestedDurationMinutes        int             `json:"duration"`            // Required: rental duration in minutes
 	StartTime                       string          `json:"start_time,omitempty"` // Optional: datetime string in format "2006-01-02 15:04:05"; defaults to current time
 	RequestedDurationStepMinutes    int             `json:"duration_step,omitempty"`
 	RequestedMinimumDurationMinutes int             `json:"min_duration,omitempty"`
@@ -144,7 +199,7 @@ func (bi BreakdownItem) String() string {
 
 type CalculateResult struct {
 	StartTime      string          `json:"start_time,omitempty"` // Datetime string if provided in request
-	EndTime        string          `json:"end_time,omitempty"` // Calculated as start_time + (duration * 60)
+	EndTime        string          `json:"end_time,omitempty"`   // Calculated as start_time + (duration * 60)
 	TotalPrice     int64           `json:"total"`
 	CoveredMinutes int             `json:"covered"`
 	Breakdown      []BreakdownItem `json:"breakdown"`

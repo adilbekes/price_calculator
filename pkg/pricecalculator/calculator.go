@@ -30,6 +30,12 @@ func (c *calculator) Calculate(req CalculateRequest) (CalculateResult, error) {
 		return CalculateResult{}, err
 	}
 
+	resolvedPeriods, err := resolvePeriods(req.Periods, effectiveStartTime)
+	if err != nil {
+		return CalculateResult{}, err
+	}
+	req.Periods = resolvedPeriods
+
 	normalizedDuration := normalizeDuration(
 		req.RequestedDurationMinutes,
 		effectiveRequestedDurationStepMinutes(req.RequestedDurationStepMinutes),
@@ -166,7 +172,6 @@ func (c *calculator) Calculate(req CalculateRequest) (CalculateResult, error) {
 	minimumDuration := minDuration(minimumDurationPeriods)
 
 	var result CalculateResult
-	var err error
 
 	if normalizedReq.PricingMode == PricingModeRoundUpMinimumAndProrateAny {
 		if normalizedReq.RequestedDurationMinutes < minimumDuration {
