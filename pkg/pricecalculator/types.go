@@ -68,7 +68,7 @@ func (pm *PricingMode) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// PeriodType matches Rentos RentalPeriodType: how a catalog pricing period is timed.
+// PeriodType is how a catalog pricing period is timed.
 type PeriodType string
 
 const (
@@ -77,7 +77,7 @@ const (
 	PeriodTypeCalendar  PeriodType = "calendar"
 )
 
-// CalendarUnit matches Rentos CalendarPeriodUnit.
+// CalendarUnit is the calendar arithmetic unit for calendar-typed periods.
 type CalendarUnit string
 
 const (

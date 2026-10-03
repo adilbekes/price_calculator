@@ -70,7 +70,7 @@ echo '{"duration":150,"mode":"RoundUp","periods":[{"duration":60,"price":1000}]}
 |---|---|---|---|---|
 | `duration` | int | ✅ | — | **Required:** Requested rental duration in minutes |
 | `start_time` | string | ❌ | Current local datetime | Optional: datetime string in `YYYY-MM-DD HH:MM:SS` format; if not provided, current time is used |
-| `periods` | array | ✅ | — | List of catalog periods (see Period Fields; types match Rentos `RentalPeriodType`) |
+| `periods` | array | ✅ | — | List of catalog pricing periods (see Period Fields) |
 | `mode` | string | ✅ | — | See [Pricing modes](#pricing-modes) |
 | `duration_step` | int | ❌ | `5` | Duration is rounded up to this step before pricing |
 | `min_duration` | int | ❌ | `5` | Requests below this are rejected with an error |
@@ -78,7 +78,7 @@ echo '{"duration":150,"mode":"RoundUp","periods":[{"duration":60,"price":1000}]}
 
 ### Period Fields
 
-Each object in `periods` supports these fields. `type` aligns with Rentos `RentalPeriodType` (`duration` | `time_range` | `calendar`). Empty `type` defaults to `duration` (backward compatible).
+Each object in `periods` supports these fields. `type` is one of `duration` | `time_range` | `calendar`. Empty `type` defaults to `duration` (backward compatible).
 
 | Field | Type | Required | Description |
 |---|---|---|---|
